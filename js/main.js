@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=31';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=31';
-import { loadAssets } from './assets.js?v=31';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=33';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=33';
+import { loadAssets } from './assets.js?v=33';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=31';
-import { GpuDust } from './gpudust.js?v=31';
-import { PostFX } from './postfx.js?v=31';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=31';
-import { GameAudio } from './audio.js?v=31';
-import { Controls } from './input.js?v=31';
+import { Grass } from './grass.js?v=33';
+import { GpuDust } from './gpudust.js?v=33';
+import { PostFX } from './postfx.js?v=33';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=33';
+import { GameAudio } from './audio.js?v=33';
+import { Controls } from './input.js?v=33';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -17,7 +17,10 @@ const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
 const params = new URLSearchParams(location.search);
 const TEST = params.has('test');
 
-const MAX_KMH = 8700, MIN_KMH = 260, MACH_KMH = 1235;
+const MAX_KMH = 8700, MIN_KMH = 150, MACH_KMH = 1235; // MAX_KMH = handling/effects reference speed, not the cap
+const NORMAL_KMH = 35620, ULTRA_KMH = 124700, BLAST_KMH = 470000, MPOV_KMH = 500;
+let TOP_KMH = NORMAL_KMH;
+const thrKmh = (t) => MIN_KMH + Math.pow(t, 2.2) * (TOP_KMH - MIN_KMH); // curved throttle: fine control at low speed, full range to the top
 let AHEAD = 16; const BEHIND = 2; // 3.8 km of terrain + obstacles ahead (>1.5 s at 8700 km/h)
 const CEILING = 270;
 
@@ -344,6 +347,8 @@ const isGrassNear = (z) => { const B = world.biomeAt(z); if (B.a === 'grass' || 
 // ---------- world streaming ----------
 let world = new World(1);
 const chunks = new Map();
+const AIC = new Map(); // AI analysis: chunk idx -> procedurally generated objects (not rendered), small LRU
+const DESTROYED = new Map(); // chunk idx -> Set of destroyed object indices (stable id = idx*4096+i)
 function addChunk(idx) {
   RX.noPatch = true;
   const geo = buildChunkGeometry(world, idx);
@@ -353,11 +358,13 @@ function addChunk(idx) {
   scene.add(mesh);
   const { objs, falls } = genChunkContent(world, idx);
   rxDeckObjs(idx, objs); RX.noPatch = false;
+  const dead = DESTROYED.get(idx); objs.forEach((o, i) => { o.uid = idx * 4096 + i; if (dead && dead.has(i)) o.dead = true; const B = S.boomZone; if (B && Math.hypot(o.x - B.x, o.z - B.z) < B.r) o.dead = true; });
   for (const f of falls) f.mesh = makeFalls(f);
   chunks.set(idx, { idx, mesh, objs, falls });
 }
 function removeChunk(idx) {
   const ch = chunks.get(idx);
+  { const set = new Set(); ch.objs.forEach((o, i) => { if (o.dead) set.add(i); }); if (set.size) DESTROYED.set(idx, set); else DESTROYED.delete(idx); } // destroyed state persists across streaming
   scene.remove(ch.mesh); ch.mesh.geometry.dispose();
   for (const f of ch.falls || []) { scene.remove(f.mesh); f.mesh.geometry.dispose(); }
   chunks.delete(idx);
@@ -377,6 +384,7 @@ function streamChunks(z, force) {
   if (changed) rebuildInstances();
 }
 function resetWorld(seed) {
+  DESTROYED.clear(); S.boomZone = null; AIC.clear();
   for (const idx of [...chunks.keys()]) removeChunk(idx);
   const fb = params.get('biome');
   world = new World(seed); if (fb && ENV[fb]) world.setSeed(seed, fb);
@@ -497,7 +505,7 @@ function resetRun(mode) {
   resetWorld(S.seed);
   S.pos.set(world.pathX(0), world.surface(world.pathX(0), 0) + (TEST && params.get('alt') ? +params.get('alt') + 2 : 30), 0);
   S.heading = 0; S.pitch = 0; S.roll = 0; S.steerS = 0;
-  S.speed = S.prevSpeed = Math.min((MIN_KMH + controls.throttle * (MAX_KMH - MIN_KMH)) / 3.6, S.autopilot ? 2000 / 3.6 : 1e9);
+  S.speed = S.prevSpeed = Math.min(thrKmh(controls.throttle) / 3.6, S.autopilot ? 2000 / 3.6 : 1e9);
   S.time = 0; S.topKmh = 0; S.nearMisses = 0; S.assist = 0; S.safeEs = null; S.safeEp = null; S.apSteer = 0;
   S.score = 0; S.combo = 0; S.comboT = 0; S.skimT = 0; S.skimAcc = 0; S.maxCombo = 0; S.bestBeaten = false; S.dist = 0; S.lastDist = 0; S.boost = 0; S.boomArmed = S.speed * 3.6 < MACH_KMH; S.crashT = 0;
   S.camYaw = 0; S.camY = S.pos.y; S.storm.k = 0;
@@ -538,6 +546,11 @@ addEventListener('keydown', (e) => {
 
 function crash() {
   if (S.mode !== 'playing') return;
+  if (RX.xsurv && !S.engineFail) { // X SURVIVAL: absorb water / rock impacts
+    const g = world.surface(S.pos.x, S.pos.z); S.pos.y = Math.max(S.pos.y, g + 18); S.pitch = Math.max(S.pitch, 0.15);
+    for (const k of ['L', 'R', 'B']) S.hp[k] = Math.max(S.hp[k], 40); flash(0.4); S.shake = 1.5; audio.scrape(1);
+    S.xSaves = (S.xSaves || 0) + 1; if (S.t - (S.xPopT || -9) > 1) { S.xPopT = S.t; pop('X SURVIVAL · IMPACT ABSORBED', 'close'); } return;
+  }
   S.mode = 'crashed'; S.crashT = 0;
   endRide(); RX.blast = null; S.land = null;
   controls.enabled = false;
@@ -863,6 +876,14 @@ function setSafe(on) {
 
 function updateFlight(dt) {
   if (rxFlightOverride(dt)) return { thr: 0, spdN: spdNf(S.speed) };
+  if (RX.blast && S.mode === 'playing') {
+    S.speed = BLAST_KMH / 3.6; headingFrame(S.heading); (S.prevPos || (S.prevPos = new THREE.Vector3())).copy(S.pos);
+    S.pos.addScaledVector(_rf, S.speed * dt); const g = world.surface(S.pos.x, S.pos.z); S.pos.y = Math.max(damp(S.pos.y, Math.min(g + 260, CEILING - 40), 3, dt), g + 60);
+    S.agl = S.pos.y - g; S.roll = damp(S.roll, 0, 6, dt); S.pitch = damp(S.pitch, 0, 6, dt); ship.position.copy(S.pos); ship.rotation.set(S.pitch, S.heading, S.roll);
+    S.dist = Math.max(S.dist, -S.pos.z); S.topKmh = Math.max(S.topKmh, BLAST_KMH);
+    if (!S.boom100) { S.boom100 = true; S.boom100N = (S.boom100N || 0) + 1; megaBoom(); }
+    return { thr: 1, spdN: 1 };
+  }
   if (S.engineFail && S.mode === 'playing') { // 7th hit: unpowered falling crash
     S.fallV = (S.fallV || 0) + 9.81 * 3 * dt; S.speed = Math.max(S.speed - 120 * dt, 60);
     headingFrame(S.heading); S.pos.addScaledVector(_rf, S.speed * dt); S.pos.y -= S.fallV * dt; S.roll += dt * 2.5; S.pitch = damp(S.pitch, -0.6, 2, dt);
@@ -878,16 +899,15 @@ function updateFlight(dt) {
   S.apManual = S.mode === 'playing' && S.autopilot && safeMode && !rxForceAP();
   if (S.apManual) { autopilotInput(S.apDt || dt); const a = safeAssist(steer, pitchIn, dt); steer = a.steer; pitchIn = a.pitch; }
   else if (S.mode === 'attract' || S.autopilot || rxForceAP()) { const a = S.apSub ? S.apLast : autopilotInput(S.apDt || dt); S.apLast = a; steer = a.steer; pitchIn = a.pitch; }
-  else if (S.mode === 'playing' && safeMode) { const a = safeAssist(steer, pitchIn, dt); steer = a.steer; pitchIn = a.pitch; }
+  else if (S.mode === 'playing' && (safeMode || RX.smart)) { const a = safeAssist(steer, pitchIn, dt); steer = a.steer; pitchIn = a.pitch; }
   const thr = S.mode === 'attract' ? Math.min(0.38, AP.thrCap) : (S.autopilot || rxForceAP()) ? Math.min(controls.throttle, AP.thrCap) : controls.throttle;
   if (S.hp && S.mode === 'playing') steer += ((100 - S.hp.R) - (100 - S.hp.L)) * 0.0028;
   steer += RX.jolt;
   S.steerIn = steer; S.pitchIn = pitchIn;
   S.steerS = damp(S.steerS, steer, 9, dt);
   // speed
-  let target = (MIN_KMH + thr * (TOP_KMH - MIN_KMH)) / 3.6 * (1 - 0.2 * (S.snowK || 0));
+  let target = thrKmh(thr) / 3.6 * (1 - 0.2 * (S.snowK || 0));
   if (S.boost > 0) { S.boost -= dt; target = Math.min(target + 320 / 3.6, TOP_KMH / 3.6); }
-  if (RX.blast) target = (RX.blast.hyper ? HYPER_KMH : BLAST_KMH) / 3.6;
   const kmhNow = S.speed * 3.6; // accel/brake authority scales with speed (8700 km/h airframe); autopilot governor brakes hard
   const rate = RX.blast && target > S.speed ? 9000 : (target > S.speed ? (S.boost > 0 ? 700 : 360) + kmhNow * 0.12 : (300 + kmhNow * 0.3) * (S.autopilot && AP.thrCap < 0.9 ? 2.5 : 1)) / 3.6 * (RX.blast ? 1 : 1);
   S.prevSpeed = S.speed;
@@ -919,7 +939,7 @@ function updateFlight(dt) {
   ship.rotation.set(S.pitch + (S.speed - S.prevSpeed) / dt * -0.0006, S.heading + S.steerS * 0.06, S.roll + rollAnim);
   S.dist = Math.max(S.dist, -S.pos.z);
   if (S.mode === 'playing' && !S.boom100 && S.speed * 3.6 >= 100000) { S.boom100 = true; S.boom100N = (S.boom100N || 0) + 1; megaBoom(); }
-  if (S.mode === 'playing') { const m = Math.floor(S.speed * 3.6 / MACH_KMH); if (m > (S.machStep || 0) && m <= 4) { S.machStep = m; audio.boom(); shock.spawn(S.pos.clone(), _v.copy(S.vel).normalize().clone(), 60 + m * 30, 0.6, new THREE.Color(1.2, 1.1, 1), 0.6); } else if (m < (S.machStep || 0) - 1) S.machStep = m; }
+  if (S.mode === 'playing') { const kk = S.speed * 3.6, m = kk >= 37000 ? 3 : kk >= 5200 ? 2 : kk >= 1200 ? 1 : 0; if (m > (S.machStep || 0)) { S.machStep = m; audio.boom(); shock.spawn(S.pos.clone(), _v.copy(S.vel).normalize().clone(), 60 + m * 30, 0.6, new THREE.Color(1.2, 1.1, 1), 0.6); } else if (m < (S.machStep || 0)) S.machStep = m; }
   if (S.mode === 'playing') { S.time += dt; S.topKmh = Math.max(S.topKmh, S.speed * 3.6); }
   return { thr, spdN };
 }
@@ -969,6 +989,11 @@ function findContacts() {
 }
 const ZONE_NAME = { L: 'LEFT WING', R: 'RIGHT WING', B: 'HULL', N: 'NOSE' };
 function resolveCollisions(dt) {
+  if (RX.blast) return false; // BLAST shield
+  if (RX.super && S.mode === 'playing') for (const o of nearObs) { // BLACKHAWK SUPERSAFE: cut a channel through anything in the way
+    if (o.dead) continue; const dx = o.x - S.pos.x, dz = o.z - S.pos.z, R = targetRadius(o) + 10;
+    if (dx * dx + dz * dz < R * R && S.pos.y < (o.y || 0) + (o.h || o.r * 2) + 8) { _v.set(o.x, S.pos.y, o.z); destroyTarget(o, _v); S.superCuts = (S.superCuts || 0) + 1; }
+  }
   if (S.land) return false;
   if (rxSlabCheck()) return true;
   const hp = S.hp;
@@ -1538,7 +1563,7 @@ function updateShipFx(thr, spdN, dt) {
 
 let hudT = 0;
 const hud = { hp: { box: $('hpBox'), L: $('hpL'), R: $('hpR'), B: $('hpB') }, ms: $('ms'), time: $('ftime'), top: $('top'), biome: $('biome'), speed: $('speed'), mach: $('mach'), agl: $('agl'), score: $('score'), dist: $('dist'), best: $('best'), combo: $('combo'), comboBar: $('comboBar'), skim: $('skim'), fill: $('thrFill'), pct: $('thrPct'), machMark: $('thrMach'), alt: { bar: $('altBar'), fill: $('altFill'), knob: $('altKnob'), pct: $('altPct') } };
-hud.machMark.style.bottom = ((MACH_KMH - MIN_KMH) / (MAX_KMH - MIN_KMH) * 100) + '%';
+hud.machMark.style.bottom = (Math.pow((MACH_KMH - MIN_KMH) / (TOP_KMH - MIN_KMH), 1 / 2.2) * 100) + '%';
 function updateHUD(dt) {
   hud.fill.style.height = (controls.throttle * 100).toFixed(1) + '%';
   { // left climb/dive stick: shows the commanded pitch (stick + tilt), knob = stick position
@@ -1733,7 +1758,7 @@ function fireMissile(opt = {}) {
   m.ride = !!opt.ride; m.freeze = !opt.free && (RX.warhead === 'freeze' || RX.freezeAmmo > 0); if (m.freeze && RX.warhead !== 'freeze') RX.freezeAmmo--;
   m.m.children[0].material.color.setRGB(m.freeze ? 0.45 : 1.0, m.freeze ? 0.85 : 0.55, m.freeze ? 1.3 : 0.2);
   _mf.copy(S.vel).normalize();
-  m.v0 = Math.max(S.speed, 60) * 1.2; m.v.copy(_mf).multiplyScalar(m.v0); m.v.y -= 6; // launch at 1.2x ship speed
+  m.ref = Math.max(S.speed, 60); m.g47 = !!opt.g47; m.v0 = m.ref * (m.g47 ? 1.7 : 1.2); m.v.copy(_mf).multiplyScalar(m.v0); m.v.y -= 6; // launch at 1.2x ship speed
   m.t = 0; m.tgt = tgt; m.on = true; m.trail = 0; m.m.visible = true; m.m.position.copy(m.p);
   audio.missile && audio.missile();
   if (!opt.free) { btn.classList.remove('shot'); void btn.offsetWidth; btn.classList.add('shot'); }
@@ -1796,9 +1821,10 @@ function updateMissiles(dt) {
       m.tgt = null; for (const c of MS.cands) if (!c.o.dead) { m.tgt = c.o; break; }
     }
     // speed profile: launch 1.2x ship speed -> 1.8x by t=1 s -> keep accelerating to 3700 km/h max, never below 1.2x ship
-    const shipV = Math.max(S.speed, 60), VMAX = Math.min(Math.max(3700 / 3.6, shipV * 1.2), 10500 / 3.6);
-    let sp = m.t < 1 ? m.v0 + (shipV * 1.8 - m.v0) * m.t : shipV * 1.8 + 650 * (m.t - 1);
-    sp = Math.max(Math.min(sp, VMAX), Math.min(shipV * 1.2, VMAX));
+    const ref = m.ref || Math.max(S.speed, 60), lm = m.g47 ? 1.7 : 1.2, VMAX = Math.max(ref * (m.g47 ? 2.8 : 2.2), 3700 / 3.6);
+    let sp = ref * lm + (VMAX - ref * lm) * Math.min(m.t / 2, 1);
+    sp = Math.max(sp, S.speed * 1.05);
+    if (m.ride) sp = MPOV_KMH / 3.6;
     m.spd = sp;
     _mf.copy(m.v).normalize();
     if (m.ride) steerRide(m, dt);
@@ -1899,13 +1925,12 @@ const RX = {
   timeScale: 1, jolt: 0, joltT: 0, joltDir: 0, above: false, zones: [], nearZones: [], noPatch: false,
   ice: false, iceK: 0, iceTint: new THREE.Color(1, 1, 1), freezeAmmo: 0, freezeCool: 0, wave: null, frozen: [],
   ride: null, blast: null, blastCool: 0, land: null, g: 1, gMax: 1, blk: 0, red: 0, ph: 0, pvy: 0,
+  phase: 0, smartM: true, g47h: true, g3far: false, cam: 'chase', camT: 1, super: false, xsurv: false, smart: false, mute: false, cig: false, gsupCool: 0,
   enemies: [], air: [], shots: [], rocks: [], geysers: [], nextRock: 0, nextGey: 0, hudT: 0, scanT: 0, scanTxt: '',
 };
 const ROOF_THICK = 24, ROOF_CLR = 5, DECK_HALF = 1100;
 const ICE_TINT = new THREE.Color(1.55, 1.65, 1.9);
 const spdNf = (sp) => Math.min(sp / (MAX_KMH / 3.6), 1);
-let TOP_KMH = MAX_KMH;
-const ULTRA_KMH = 35620, BLAST_KMH = 124700, HYPER_KMH = 470000, MPOV_KMH = 500;
 
 // ---------- 1) UPPER WORLD: sky-deck zones with escape holes ----------
 function rxPatchWorld(w) {
@@ -2103,11 +2128,11 @@ function safeAlt(x, y, z, pad) { // lift a free-flying jet above terrain and nea
 }
 
 // ---------- 2) WINGMEN SQUAD + FREEZE SHOCKWAVE ----------
-const WING_NAMES = ['WINGMEN OFF', 'WINGMEN · ESCORT', 'WINGMEN · POINT'];
+const WING_NAMES = ['Gs OFF', 'Gs · ESCORT', 'Gs · INTERCEPT'];
 let wingmen = null;
 function ensureWingmen() {
   if (wingmen) return;
-  wingmen = [-1, 1].map((side, i) => ({ side, mesh: makeJet(new THREE.Color(0x3d4a5a), new THREE.Color(0x1b2633)), p: new THREE.Vector3().copy(S.pos), v: new THREE.Vector3(), fireT: 0.6 + i * 0.5, roll: 0 }));
+  wingmen = [-1, 1].map((side, i) => ({ side, mesh: (() => { const m = makeJet(new THREE.Color(0x3d4a5a), new THREE.Color(0x1b2633)); m.scale.setScalar(0.4); return m; })(), p: new THREE.Vector3().copy(S.pos), v: new THREE.Vector3(), fireT: 0.6 + i * 0.5, roll: 0 }));
 }
 function setWing(m) { RX.wing = m; ensureWingmen(); if (m) for (const w of wingmen) w.p.copy(S.pos).addScaledVector(_rr, w.side * 30); pop(WING_NAMES[m], 'banked'); rxMenuSync(); }
 function updateWingmen(dt) {
@@ -2243,16 +2268,17 @@ function freezeHit(o, p) { // freeze warhead: target + neighbours within 80 m fl
 }
 
 // ---------- 4) ULTRA speed + BLAST boost into the Ice Age portal ----------
-function megaBoom() { // one-shot destructive 100,000 km/h boom: shatters every obstacle within 1.5 km
+function megaBoom() { // one-shot destructive 100,000 km/h boom: destroys every obstacle within 27 km (later chunks too); detailed debris only for the nearest
   flash(1); S.shake = 3; audio.boom(); audio.explode();
   shock.spawn(S.pos.clone(), new THREE.Vector3(0, 1, 0), 1500, 1.4, new THREE.Color(1.4, 1.2, 1.0), 1);
-  let n = 0; for (const ch of chunks.values()) for (const o of ch.objs) if (!o.dead && Math.hypot(o.x - S.pos.x, o.z - S.pos.z) < 1500) { o.dead = true; n++; }
+  S.boomZone = { x: S.pos.x, z: S.pos.z, r: 27000 }; let n = 0;
+  for (const ch of chunks.values()) for (const o of ch.objs) if (!o.dead && Math.hypot(o.x - S.pos.x, o.z - S.pos.z) < 27000) { o.dead = true; n++; if (n < 40) airburst(_v.set(o.x, o.y + (o.h || 0) * 0.5, o.z)); }
   RX.instDirty = true; pop('100,000 KM/H · HYPERSONIC BOOM · ' + n + ' DESTROYED', 'unlock'); rxSay('Hypersonic boom.', 'boom');
 }
 function setUltra(on) {
-  RX.ultra = on; TOP_KMH = on ? ULTRA_KMH : MAX_KMH;
-  hud.machMark.style.bottom = ((MACH_KMH - MIN_KMH) / (TOP_KMH - MIN_KMH) * 100) + '%';
-  pop(on ? 'ULTRA · TOP SPEED 35,620 KM/H' : 'ULTRA OFF · 8,700 KM/H', 'mach'); rxSay(on ? 'Ultra speed unlocked.' : 'Ultra off.', 'ultra'); rxMenuSync();
+  RX.ultra = on; TOP_KMH = on ? ULTRA_KMH : NORMAL_KMH;
+  hud.machMark.style.bottom = (Math.pow((MACH_KMH - MIN_KMH) / (TOP_KMH - MIN_KMH), 1 / 2.2) * 100) + '%';
+  pop(on ? 'ULTRA · TOP SPEED 124,700 KM/H' : 'ULTRA OFF · 35,620 KM/H', 'mach'); rxSay(on ? 'Ultra speed unlocked.' : 'Ultra off.', 'ultra'); rxMenuSync();
 }
 const portalMat = new THREE.ShaderMaterial({
   uniforms: { time: { value: 0 }, k: { value: 0 }, ice: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
@@ -2267,33 +2293,38 @@ const portalMat = new THREE.ShaderMaterial({
 });
 const portal = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), portalMat); portal.visible = false; portal.frustumCulled = false; portal.renderOrder = 15; scene.add(portal);
 function blastGo() {
-  if (RX.blast && !RX.blast.hyper) { RX.blast.hyper = true; pop('HYPER · 470,000 KM/H', 'mach'); return; }
   if (S.mode !== 'playing' || RX.blast || S.land) return;
   if (RX.blastCool > 0) { pop('BLAST RECHARGING ' + Math.ceil(RX.blastCool) + ' s', 'close'); return; }
   endRide(); RX.blast = { t: 0, portal: null, passed: false };
-  audio.boom(); flash(0.5); S.shake = 2; pop('BLAST · 124,700 KM/H · SHIELD UP', 'mach'); rxSay(RX.ice ? 'Blast. Portal home opening.' : 'Blast. Portal opening.', 'blast');
+  audio.boom(); flash(0.5); S.shake = 2; pop('BLAST · 470,000 KM/H · SHIELD UP', 'mach'); rxSay(RX.ice ? 'Blast. Portal home opening.' : 'Blast. Portal opening.', 'blast');
+}
+function blastExit() { // drop out of BLAST at the normal top speed; squad comes through the portal with you
+  S.speed = Math.min(S.speed, TOP_KMH / 3.6 * 0.5); S.prevSpeed = S.speed; streamChunks(S.pos.z, true); AP.best = null;
+  headingFrame(S.heading); for (const w of (wingmen || [])) w.p.copy(S.pos).addScaledVector(_rr, w.side * 30);
+  if (typeof carrier !== 'undefined' && carrier) { carrier.p.copy(S.pos).addScaledVector(_rf, 400).y += 80; for (const h of carrier.helpers) h.p.copy(carrier.p); }
+  if (typeof drone !== 'undefined' && drone) drone.p.copy(S.pos).addScaledVector(_rf, 900);
 }
 function updateBlast(dt) {
   RX.blastCool = Math.max(0, RX.blastCool - dt);
   portalMat.uniforms.time.value = S.t;
   const B = RX.blast; if (!B) { portal.visible = false; return; }
   B.t += dt;
-  if (B.t > 1.0 && !B.portal) { // open the portal 2.5 km ahead on the current track
+  if (B.t > 0.01 && !B.portal) { // open the portal 2.5 km ahead on the current track
     headingFrame(S.heading);
-    B.portal = { p: S.pos.clone().addScaledVector(_rf, Math.min(Math.max(2500, S.speed * 1.4), 4500)), h: S.heading };
+    B.portal = { p: S.pos.clone().addScaledVector(_rf, S.speed * (1.0 - B.t)), h: S.heading };
     B.portal.p.y = Math.max(S.pos.y, world.surface(B.portal.p.x, B.portal.p.z) + 40);
   }
   if (B.portal) {
     const P = B.portal; portal.visible = !B.passed; portal.position.copy(P.p); portal.rotation.set(0, P.h, 0);
-    portalMat.uniforms.k.value = clamp((B.t - 1.0) * 3, 0, 1); portalMat.uniforms.ice.value = RX.ice ? 1 : 0;
+    portalMat.uniforms.k.value = clamp(B.t / 1.0, 0, 1); portal.scale.setScalar(Math.max(1, S.pos.distanceTo(P.p) / 1800)); portalMat.uniforms.ice.value = RX.ice ? 1 : 0;
     if (!B.passed) { // steer the ship into the ring; pass when its plane is crossed
       P.p.y = damp(P.p.y, S.pos.y, 3, dt);
       headingFrame(P.h); const along = (S.pos.x - P.p.x) * _rf.x + (S.pos.z - P.p.z) * _rf.z;
       if (along > 0) { B.passed = true; B.endT = B.t; enterIceAge(!RX.ice); }
     }
   }
-  if (B.passed && B.t > B.endT + 0.9) { RX.blast = null; RX.blastCool = 15; portal.visible = false; }
-  if (B.t > 9) { RX.blast = null; RX.blastCool = 10; portal.visible = false; }
+  if (B.passed) { RX.blast = null; RX.blastCool = 15; portal.visible = false; blastExit(); }
+  if (RX.blast && B.t > 3) { RX.blast = null; RX.blastCool = 10; portal.visible = false; blastExit(); }
 }
 function enterIceAge(on) {
   RX.ice = on; flash(1); S.shake = 2.5; audio.boom();
@@ -2369,6 +2400,7 @@ function updateHostiles(dt) {
       if (e.fall <= 0 || e.p.y < world.surface(e.p.x, e.p.z)) { if (e.p.y < world.surface(e.p.x, e.p.z) + 5) airburst(e.p); e.mesh.visible = false; e.mesh.userData.used = false; RX.enemies.splice(i, 1); }
       continue;
     }
+    if (e.iceT > 0) { e.iceT -= dt; e.mesh.position.copy(e.p); if (e.iceT <= 0) { e.hp = 1; damageJet(e, 1, e.p); for (let k = 0; k < 40; k++) glow.spawn(e.p.x, e.p.y, e.p.z, (Math.random() - 0.5) * 80, Math.random() * 40, (Math.random() - 0.5) * 80, 0.6, 3, 8, 0.9, 1.5, 2.2, 3, 1.6, -18); } continue; } // frozen mid-air, then shatters
     e.ph += dt;
     const leaving = !inside || S.mode !== 'playing';
     _rq.copy(S.pos).addScaledVector(_rf, leaving ? e.ahead + 900 : e.ahead + Math.sin(e.ph * 0.7) * 120).addScaledVector(_rr, e.lat + Math.sin(e.ph * 1.3) * 90);
@@ -2384,6 +2416,14 @@ function updateHostiles(dt) {
   }
   for (const s of shotPool) { // enemy cannon bursts: closing at ~420 m/s relative, dodge by turning
     if (!s.on) continue; s.t += dt;
+    if (RX.wing > 0 && wingmen && S.mode === 'playing') {
+      if (s.icpt === undefined) { s.icpt = Math.random() < 0.7; s.by = wingmen[(RX.gsK = (RX.gsK || 0) + 1) & 1]; } // Gs stop many shots, not all
+      if (s.icpt && s.p.distanceTo(S.pos) < 650) {
+        for (let i = 0; i <= 10; i++) { const u = i / 10; glow.spawn(s.by.p.x + (s.p.x - s.by.p.x) * u, s.by.p.y + (s.p.y - s.by.p.y) * u, s.by.p.z + (s.p.z - s.by.p.z) * u, 0, 0, 0, 0.25, 1.6, 0.6, 1, 0.6, 1.4, 2.4, 0, 0); }
+        for (let i = 0; i < 18; i++) glow.spawn(s.p.x, s.p.y, s.p.z, (Math.random() - 0.5) * 60, (Math.random() - 0.5) * 60, (Math.random() - 0.5) * 60, 0.5, 2.5, 6, 1, 3, 1.5, 0.4, 1, 0);
+        s.on = false; s.s.visible = false; s.icpt = undefined; S.gsIntercepts = (S.gsIntercepts || 0) + 1; pop('Gs INTERCEPT · ' + S.gsIntercepts, 'banked'); continue;
+      }
+    }
     const ox = s.p.x, oz = s.p.z, oy = s.p.y; s.p.addScaledVector(s.v, dt); s.s.position.copy(s.p);
     const sx = s.p.x - ox, sy = s.p.y - oy, sz = s.p.z - oz, sl = sx * sx + sy * sy + sz * sz;
     let u = sl > 0 ? ((S.pos.x - ox) * sx + (S.pos.y - oy) * sy + (S.pos.z - oz) * sz) / sl : 0; u = clamp(u, 0, 1);
@@ -2398,7 +2438,7 @@ function updateHostiles(dt) {
       if (S.hp.B <= 0) { S.crashCause = 'SHOT DOWN'; crash(); }
       continue;
     }
-    if (s.t > 3 || s.p.y < world.surface(s.p.x, s.p.z)) { s.on = false; s.s.visible = false; }
+    if (s.t > 3 || s.p.y < world.surface(s.p.x, s.p.z)) { s.on = false; s.s.visible = false; s.icpt = undefined; }
   }
 }
 function enemyShoot(e) {
@@ -2478,8 +2518,8 @@ function geyserForces(dt) { // updraft + turbulence while inside a plume
 }
 function boltNear(x0, z0) { // lightning that strikes near the ship jolts the controls
   if (S.mode !== 'playing') return;
-  if (Math.hypot(x0 - S.pos.x, z0 - S.pos.z) > 320) return;
-  RX.joltT = 0.7; RX.joltDir = Math.random() < 0.5 ? -1 : 1; S.shake = Math.max(S.shake, 1.6); flash(0.6);
+  if (Math.hypot(x0 - S.pos.x, z0 - S.pos.z) > 320 || RX.phase > 0) return;
+  RX.joltT = 2 + Math.random() * 2; RX.joltDir = Math.random() < 0.5 ? -1 : 1; S.shake = Math.max(S.shake, 1.6); flash(0.6);
   const floor = (S.autopilot || rxForceAP() || safeMode) ? 20 : 1; S.hp.B = Math.max(floor, S.hp.B - 6); S.noContactT = 0;
   pop('⚡ LIGHTNING STRIKE · CONTROLS JOLTED', 'close'); rxSay('Lightning strike.', 'bolt');
   $('rxStatic').classList.remove('on'); void $('rxStatic').offsetWidth; $('rxStatic').classList.add('on');
@@ -2501,6 +2541,7 @@ function setGhost(on) {
 }
 function rxScanner() {
   if (!RX.scanner || S.mode !== 'playing') return '';
+  return aiAnalysis();
   let what = null, tti = Infinity;
   if (MS.threat && MS.cands.length) { what = (TARGET_NAME[MS.cands[0].o.type] || 'OBSTACLE'); tti = MS.cands[0].tti; }
   const r = predict(S.steerIn || 0, S.pitchIn || 0, 3, 14, 3.5); // full model: terrain, rocks, deck, hazards
@@ -2561,14 +2602,15 @@ function rxReset() {
   for (const s of shotPool) { s.on = false; s.s.visible = false; }
   RX.rocks.length = 0; RX.geysers.length = 0; RX.frozen.length = 0; RX.nextRock = 0; RX.nextGey = 0; RX.wave = null; waveMesh.visible = false;
   RX.blast = null; RX.blastCool = 0; portal.visible = false; endRide(); S.land = null; RX.freezeCool = 0; RX.g = 1; RX.gMax = 1; RX.blk = 0; RX.red = 0; RX.ph = S.heading; RX.pvy = 0;
-  RX.freezeAmmo = params.has('freezeammo') ? 6 : 0; S.jetKills = 0; S.misHits = 0; S.engineFail = false; S.fallV = 0; S.boom100 = false; S.machStep = 0;
+  RX.gsupCool = 0; S.gsIntercepts = 0; RX.freezeAmmo = params.has('freezeammo') ? 6 : 0; S.jetKills = 0; S.misHits = 0; S.engineFail = false; S.fallV = 0; S.boom100 = false; S.machStep = 0; S.boomZone = null;
   if (RX.ice && !params.has('ice')) { RX.ice = false; } if (params.has('ice')) RX.ice = true;
 }
 function rxClearDeckMeshes() { for (const zn of RX.zones) if (zn.mesh) { scene.remove(zn.mesh); zn.mesh.geometry.dispose(); zn.mesh = null; } }
 function rxUpdate(dt, rdt) { // dt = game (possibly slow-mo) time, rdt = real time
   RX.timeScale = damp(RX.timeScale, RX.ride ? 0.3 : 1, 6, rdt);
   RX.joltT = Math.max(0, RX.joltT - dt);
-  RX.jolt = RX.joltT > 0 ? RX.joltDir * 0.6 * (RX.joltT / 0.7) * (S.autopilot || rxForceAP() ? 0.2 : 1) + Math.sin(S.t * 60) * 0.15 * RX.joltT : 0;
+  RX.jolt = RX.joltT > 0 ? RX.joltDir * 0.6 * Math.min(RX.joltT / 0.7, 1) * (S.autopilot || rxForceAP() ? 0.2 : 1) + Math.sin(S.t * 60) * 0.15 * RX.joltT : 0;
+  RX.gsupCool = Math.max(0, RX.gsupCool - dt);
   updateHazards(dt); updateWingmen(dt); updateEscorts(dt); updateFreeze(dt); updateBlast(dt); updateHostiles(dt); updateG(dt);
   if (RX.instDirty) { RX.instDirty = false; rebuildInstances(); }
   RX.hudT -= rdt;
@@ -2598,6 +2640,7 @@ function rxUpdate(dt, rdt) { // dt = game (possibly slow-mo) time, rdt = real ti
 }
 function rxCamera(dt) {
   const m = RX.ride;
+  if (!(m && m.on)) viewCamera(dt);
   if (m && m.on) {
     _rq.copy(m.v).normalize();
     camera.position.copy(m.p).addScaledVector(_rq, -10); camera.position.y += 2.4;
@@ -2615,36 +2658,49 @@ function rxCamera(dt) {
 function rxMenuSync() {
   const set = (id, txt, on) => { const b = $(id); if (!b) return; b.textContent = txt; b.classList.toggle('on', !!on); };
   set('mxWing', WING_NAMES[RX.wing], RX.wing > 0);
-  set('mxWar', RX.warhead === 'freeze' ? 'WARHEAD · FREEZE' : 'WARHEAD · HIGH-EXPLOSIVE', RX.warhead === 'freeze');
-  set('mxUltra', RX.ultra ? 'ULTRA · 35,000 ON' : 'ULTRA · OFF', RX.ultra);
+  set('mxWar', RX.warhead === 'freeze' ? 'FREEZE MISSILE · ON' : 'FREEZE MISSILE · OFF', RX.warhead === 'freeze');
+  set('mxUltra', RX.ultra ? 'ULTRA · 124,700 ON' : 'ULTRA · OFF', RX.ultra);
   set('mxGhost', RX.ghost ? 'GHOST · ON' : 'GHOST · OFF', RX.ghost);
-  set('mxScan', RX.scanner ? 'AI SCANNER · ON' : 'AI SCANNER · OFF', RX.scanner);
-  set('mxVoice', RX.voice ? 'VOICE · ON' : 'VOICE · OFF', RX.voice);
+  set('mxScan', RX.scanner ? 'AI ANALYSIS · ON' : 'AI ANALYSIS · OFF', RX.scanner);
+  set('mxVoice', RX.voice ? 'CALLOUTS · ON' : 'CALLOUTS · OFF', RX.voice);
   set('mxG', RX.gfx ? 'G-EFFECTS · ON' : 'G-EFFECTS · OFF', RX.gfx);
-  set('mxCarrier', RX.carrier ? 'CARRIER + 2 JETS · ON' : 'CARRIER ESCORT · OFF', RX.carrier);
-  set('mxDrone', RX.drone ? 'SCOUT DRONE · ON' : 'SCOUT DRONE · OFF', RX.drone);
+  set('mxCarrier', RX.carrier ? 'G47 · ON STATION' : 'CALL G47', RX.carrier);
+  set('mxDrone', RX.drone ? 'G3 · ON' : 'G3 · OFF', RX.drone);
+  set('mxG3far', RX.g3far ? 'G3 · FAR' : 'G3 · NEAR', RX.g3far);
+  set('mxHelp', RX.g47h ? 'G47 HELPERS · ON' : 'G47 HELPERS · OFF', RX.g47h);
+  set('mxSmartM', RX.smartM ? 'SMART MISSILES · ON' : 'SMART MISSILES · OFF', RX.smartM);
+  set('mxSuper', RX.super ? 'SUPERSAFE · ON' : 'SUPERSAFE · OFF', RX.super);
+  set('mxX', RX.xsurv ? 'X SURVIVAL · ON' : 'X SURVIVAL · OFF', RX.xsurv);
+  set('mxPhase', ['PHASE · OFF', 'PHASE · ME ONLY', 'PHASE · ALL FRIENDLY'][RX.phase], RX.phase > 0);
+  set('mxSmart', RX.smart ? 'SMART AVOID · ON' : 'SMART AVOID · OFF', RX.smart);
+  set('mxSound', RX.mute ? 'SOUND · OFF' : 'SOUND · ON', !RX.mute);
+  set('mxCig', RX.cig ? 'CIGARETTE · ON' : 'CIGARETTE · OFF', RX.cig);
+  set('mxAuto', S.autopilot ? 'AUTOPILOT · ON' : 'AUTOPILOT · OFF', S.autopilot);
+  set('mxSafe', safeMode ? 'SAFE · ON' : 'SAFE · OFF', safeMode);
+  set('mxGsup', RX.gsupCool > 0 ? 'Gs SUPERMODE · ' + Math.ceil(RX.gsupCool) + ' s' : 'Gs SUPERMODE', false);
+  for (const [id, c] of [['mxCchase', 'chase'], ['mxCcock', 'cockpit'], ['mxCg3', 'g3'], ['mxCg47', 'g47']]) { const b = $(id); if (b) b.classList.toggle('on', RX.cam === c); }
   set('mxPip', PIP_NAMES[RX.pip], RX.pip > 0);
   set('mxSwipe', controls.swipeSteer ? 'SWIPE STEER · ON' : 'SWIPE STEER · OFF', controls.swipeSteer);
   const vc = $('voiceChip'); if (vc) vc.textContent = 'Voice callouts: ' + (RX.voice ? 'ON' : 'OFF');
-  $('rxScan').classList.toggle('hidden', !RX.scanner);
+  $('rxScan').classList.toggle('hidden', !RX.scanner); if (!RX.scanner) $('aiBox').classList.add('hidden');
 }
 function rxMenu(open) { const m = $('rxMenu'); const o = open ?? m.classList.contains('hidden'); m.classList.toggle('hidden', !o); $('rxScrim').classList.toggle('hidden', !o); $('rxTab').classList.toggle('on', o); }
 // ---------- optional escorts: command carrier (+2 helpers) and scout drone with live camera feeds ----------
 RX.carrier = false; RX.drone = false; RX.pip = 0; RX.strikeCool = 40; RX.strikeOffer = false; RX.strikeFx = 0;
 let carrier = null, drone = null;
-const PIP_NAMES = ['FEED · OFF', 'FEED · CARRIER CAM', 'FEED · SCOUT CAM'];
+const PIP_NAMES = ['FEED · OFF', 'FEED · G47 CAM', 'FEED · G3 CAM'];
 function ensureCarrier() {
   if (carrier) return;
-  const m = makeJet(new THREE.Color(0x2a2f36), new THREE.Color(0x8a5a1c)); m.scale.setScalar(4.2);
-  carrier = { mesh: m, p: S.pos.clone(), fireT: 1, roll: 0, helpers: [-1, 1].map((side) => ({ side, mesh: makeJet(new THREE.Color(0x5b4a2e), new THREE.Color(0x2a1d0e)), p: S.pos.clone() })) };
+  const m = makeJet(new THREE.Color(0x15171b), new THREE.Color(0xd9dde2)); m.scale.setScalar(4.2); addNav(m);
+  carrier = { mesh: m, p: S.pos.clone(), fireT: 1, roll: 0, helpers: [-1, 1].map((side) => ({ side, mesh: (() => { const h = makeJet(new THREE.Color(0x6b7078), new THREE.Color(0xe8ebee)); h.scale.setScalar(1.4); return h; })(), p: S.pos.clone() })) };
 }
 function ensureDrone() {
   if (drone) return;
   const m = makeJet(new THREE.Color(0xb9c2cc), new THREE.Color(0x22d3ff)); m.scale.setScalar(0.45);
   drone = { mesh: m, p: S.pos.clone() };
 }
-function setCarrier(on) { RX.carrier = on; ensureCarrier(); if (on) { headingFrame(S.heading); carrier.p.copy(S.pos).addScaledVector(_rf, -200).add(new THREE.Vector3(0, 60, 0)); for (const h of carrier.helpers) h.p.copy(carrier.p); } else if (RX.pip === 1) RX.pip = 0; pop(on ? 'CARRIER ESCORT · MISSILE SUPPORT' : 'CARRIER ESCORT OFF', 'banked'); rxMenuSync(); }
-function setDrone(on) { RX.drone = on; ensureDrone(); if (on) drone.p.copy(S.pos); else { if (RX.pip === 2) RX.pip = 0; strikeCard(false); } pop(on ? 'SCOUT DRONE · LIVE FEED' : 'SCOUT DRONE OFF', 'banked'); rxMenuSync(); }
+function setCarrier(on) { RX.carrier = on; ensureCarrier(); if (on) { headingFrame(S.heading); carrier.p.copy(S.pos).addScaledVector(_rf, -200).add(new THREE.Vector3(0, 60, 0)); for (const h of carrier.helpers) h.p.copy(carrier.p); } else if (RX.pip === 1) RX.pip = 0; pop(on ? 'G47 CALLED · MISSILE SUPPORT' : 'G47 DISMISSED', 'banked'); rxMenuSync(); }
+function setDrone(on) { RX.drone = on; ensureDrone(); if (on) drone.p.copy(S.pos); else { if (RX.pip === 2) RX.pip = 0; strikeCard(false); } pop(on ? 'G3 SCOUT · AHEAD' : 'G3 OFF', 'banked'); rxMenuSync(); }
 function cyclePip() { let n = RX.pip; for (let i = 0; i < 3; i++) { n = (n + 1) % 3; if (n === 0 || (n === 1 && RX.carrier) || (n === 2 && RX.drone)) break; } RX.pip = n; $('rxPip').classList.add('hidden'); rxMenuSync(); }
 function flyTo(o, tgt, k, pad, dt) { o.p.lerp(tgt, 1 - Math.exp(-k * dt)); o.p.y = safeAlt(o.p.x, o.p.y, o.p.z, pad); }
 function updateEscorts(dt) {
@@ -2652,21 +2708,22 @@ function updateEscorts(dt) {
   headingFrame(S.heading);
   if (carrier) {
     const on = RX.carrier && live; carrier.mesh.visible = on;
-    for (const h of carrier.helpers) h.mesh.visible = on;
+    for (const h of carrier.helpers) h.mesh.visible = on && RX.g47h;
+    if (carrier.mesh.userData.nav) { const b = (S.t % 1.2) < 0.12; for (const n of carrier.mesh.userData.nav) n.visible = on && (n.userData.steady || b); }
     if (on) {
-      _rq.copy(S.pos).addScaledVector(_rf, -240).addScaledVector(_rr, 90); _rq.y = Math.max(S.pos.y + 95, _rq.y);
+      { const k = clamp(Math.round(MPATH.length * (RX.g3far ? 0.95 : 0.7)), 4, MPATH.length - 1); _rq.copy(MPATH[k]).addScaledVector(_rr, 70); _rq.y = Math.max(_rq.y + 120, S.pos.y + 90); }
       flyTo(carrier, _rq, 2.2, 30, dt); carrier.roll = damp(carrier.roll, S.roll * 0.35, 2, dt);
       carrier.mesh.position.copy(carrier.p); carrier.mesh.rotation.set(S.pitch * 0.5, S.heading, carrier.roll);
       for (const h of carrier.helpers) {
         _rq.copy(carrier.p).addScaledVector(_rr, h.side * 55).addScaledVector(_rf, -25); _rq.y -= 6;
         flyTo(h, _rq, 5, 10, dt); h.mesh.position.copy(h.p); h.mesh.rotation.set(S.pitch, S.heading, S.roll * 0.7);
       }
-      if (S.mode === 'playing' && !S.land) { // smart missile support: picks the most urgent threat nobody is covering yet
+      if (S.mode === 'playing' && !S.land && RX.smartM) { // smart missile support: picks the most urgent threat nobody is covering yet
         carrier.fireT -= dt;
         if (carrier.fireT <= 0) {
           let tgt = null; for (const c of MS.cands) if (!c.o.dead && incoming(c.o) < needed(c.o) && (c.tti < 4 || c.o.jet)) { tgt = c.o; break; }
-          const from = carrier.helpers[(carrier.k = (carrier.k || 0) ^ 1)].p;
-          carrier.fireT = tgt && fireMissile({ from: tgt.jet ? carrier.p : from, free: true, tgt }) ? 0.7 : 0.2;
+          const from = RX.g47h ? carrier.helpers[(carrier.k = (carrier.k || 0) ^ 1)].p : carrier.p;
+          carrier.fireT = tgt && fireMissile({ from: tgt.jet ? carrier.p : from, free: true, tgt, g47: true }) ? 0.7 : 0.2;
         }
       }
     }
@@ -2674,15 +2731,17 @@ function updateEscorts(dt) {
   if (drone) {
     const on = RX.drone && live; drone.mesh.visible = on;
     if (on) {
-      const k = clamp(Math.round(MPATH.length * 0.8), 4, MPATH.length - 1); _rq.copy(MPATH[k]); _rq.y += 45;
-      flyTo(drone, _rq, 2.5, 35, dt); drone.mesh.position.copy(drone.p); drone.mesh.rotation.set(0, S.heading, Math.sin(S.t * 1.3) * 0.15);
+      const k = clamp(Math.round(MPATH.length * (RX.g3far ? 0.85 : 0.45)), 4, MPATH.length - 1); _rq.copy(MPATH[k]); _rq.y += RX.g3far ? 55 : 30;
+      flyTo(drone, _rq, 2.5, 35, dt); drone.mesh.position.copy(drone.p);
+      drone.rollT = (drone.rollT ?? 6) - dt; if (drone.rollT < -0.9) drone.rollT = 7 + Math.random() * 8;
+      drone.mesh.rotation.set(0, S.heading, Math.sin(S.t * 1.3) * 0.15 + (drone.rollT < 0 ? (-drone.rollT / 0.9) * Math.PI * 2 : 0));
       RX.strikeCool = Math.max(0, RX.strikeCool - dt);
-      if (RX.strikeCool <= 0 && !RX.strikeOffer && S.mode === 'playing') strikeCard(true);
+      if (S.mode === 'playing' && !S.land) { drone.fireT = (drone.fireT ?? 1.5) - dt; if (drone.fireT <= 0) { let tgt = null; for (const c of MS.cands) if (!c.o.dead && incoming(c.o) < needed(c.o) && c.tti < 5) { tgt = c.o; break; } drone.fireT = tgt && fireMissile({ from: drone.p, free: true, tgt }) ? 1.6 : 0.3; } }
     }
   }
   if (RX.strikeFx > 0) { RX.strikeFx -= dt; $('rxFlash').style.opacity = clamp(RX.strikeFx * 1.6, 0, 1).toFixed(2); }
 }
-function strikeCard(show) { RX.strikeOffer = show; $('rxCard').classList.toggle('hidden', !show); if (show) rxSay('Scout has a strike lined up. Approve?', 'strike'); }
+function strikeCard(show) { RX.strikeOffer = show; $('rxCard').classList.toggle('hidden', !show); if (show) rxSay('G3 has a strike lined up. Approve?', 'strike'); }
 function scoutStrike() {
   strikeCard(false); RX.strikeCool = 120;
   if (S.mode !== 'playing') return;
@@ -2729,6 +2788,17 @@ const RX_ACT = {
   mxG: () => { RX.gfx = !RX.gfx; localStorage.setItem('canyon.gfx', RX.gfx ? '1' : '0'); rxMenuSync(); },
   mxCarrier: () => setCarrier(!RX.carrier), mxDrone: () => setDrone(!RX.drone), mxPip: () => cyclePip(),
   mxSwipe: () => { controls.swipeSteer = !controls.swipeSteer; localStorage.setItem('canyon.swipe', controls.swipeSteer ? '1' : '0'); pop(controls.swipeSteer ? 'SWIPE STEERING ON · DRAG TO FLY' : 'SWIPE STEERING OFF', 'banked'); rxMenuSync(); },
+  mxAuto: () => { setAutopilot(!S.autopilot); rxMenuSync(); }, mxSafe: () => { setSafe(!safeMode); rxMenuSync(); }, mxFire: () => fireMissile(),
+  mxSuper: () => { RX.super = !RX.super; pop(RX.super ? 'BLACKHAWK SUPERSAFE · CUTS THROUGH OBSTACLES' : 'SUPERSAFE OFF', 'unlock'); rxMenuSync(); },
+  mxX: () => { RX.xsurv = !RX.xsurv; pop(RX.xsurv ? 'X SURVIVAL · WATER & ROCK IMPACTS ABSORBED' : 'X SURVIVAL OFF', 'unlock'); rxMenuSync(); },
+  mxPhase: () => setPhase((RX.phase + 1) % 3), mxSmart: () => { RX.smart = !RX.smart; pop(RX.smart ? 'SMART ROCK AVOIDANCE ON' : 'SMART ROCK AVOIDANCE OFF', 'banked'); rxMenuSync(); },
+  mxGsup: () => gsSupermode(), mxG3far: () => { RX.g3far = !RX.g3far; rxMenuSync(); }, mxHelp: () => { RX.g47h = !RX.g47h; rxMenuSync(); },
+  mxG3req: () => { if (!RX.drone) setDrone(true); if (RX.strikeCool > 0) pop('G3 STRIKE RECHARGING ' + Math.ceil(RX.strikeCool) + ' s', 'close'); else strikeCard(true); },
+  mxSmartM: () => { RX.smartM = !RX.smartM; rxMenuSync(); },
+  mxCchase: () => setCam('chase'), mxCcock: () => setCam('cockpit'), mxCg3: () => setCam('g3'), mxCg47: () => setCam('g47'),
+  mxSound: () => { RX.mute = !RX.mute; audio.setMaster(RX.mute ? 0 : (settings.vol ?? 0.85)); rxMenuSync(); },
+  mxCig: () => { RX.cig = !RX.cig; rxMenuSync(); },
+  trayTab: () => rxMenu(true),
   rxCardYes: () => scoutStrike(), rxCardNo: () => { strikeCard(false); RX.strikeCool = 45; }, rxMenuX: () => rxMenu(false),
   rxWaveBtn: () => freezeWave(), rxCamBtn: () => rideToggle(), rxExit: () => endRide(), rxLandBtn: () => rxLandToggle(),
 };
@@ -2736,7 +2806,7 @@ for (const id in RX_ACT) { const el = $(id); if (!el) continue; el.addEventListe
 $('rxTab').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); rxMenu(); });
 $('rxTab').addEventListener('click', (e) => e.stopPropagation());
 $('rxMenu').addEventListener('pointerdown', (e) => { e.stopPropagation(); RX.mSw = { x: e.clientX, y: e.clientY }; });
-$('rxMenu').addEventListener('pointerup', (e) => { const w = RX.mSw; RX.mSw = null; if (w && Math.abs(e.clientX - w.x) > 60 && Math.abs(e.clientX - w.x) > Math.abs(e.clientY - w.y) * 1.5) rxMenu(false); }); // swipe sideways to dismiss
+$('rxMenu').addEventListener('pointerup', (e) => { const w = RX.mSw; RX.mSw = null; if (w && e.clientY - w.y > 50 && e.clientY - w.y > Math.abs(e.clientX - w.x) * 1.5) rxMenu(false); }); // tray scrolls sideways; swipe down to close
 $('rxScrim').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); rxMenu(false); }); // tap outside closes
 $('voiceChip').addEventListener('click', (e) => { e.stopPropagation(); setVoice(!RX.voice); });
 addEventListener('keydown', (e) => {
@@ -2844,7 +2914,7 @@ function tick(dt, draw) {
   let thr = controls.throttle, spdN = spdNf(S.speed);
   if (S.mode !== 'crashed') {
     // fixed sub-steps: never move more than ~20 m (8700 km/h) between swept collision tests, at any frame rate
-    const nSub = Math.min(16, Math.max(1, Math.ceil(dt / (1 / 120)), Math.ceil(S.speed * dt / 22))), sdt = dt / nSub;
+    const nSub = Math.min(40, Math.max(1, Math.ceil(dt / (1 / 120)), Math.ceil(S.speed * dt / 22))), sdt = dt / nSub;
     S.apDt = dt;
     for (let i = 0; i < nSub && S.mode !== 'crashed'; i++) {
       S.apSub = i > 0;
@@ -2852,7 +2922,7 @@ function tick(dt, draw) {
       if (S.mode === 'playing' && !S.noCollide && resolveCollisions(sdt)) { crash(); break; }
     }
     S.apSub = false;
-    streamChunks(S.pos.z, false);
+    if (!RX.blast) streamChunks(S.pos.z, false);
     updateDamage(dt);
     nearMisses();
     const kmh = S.speed * 3.6;
@@ -2940,6 +3010,129 @@ function setVoiceCtl(on) {
 }
 $('mxVc').addEventListener('click', () => setVoiceCtl(!VC.on));
 window.__game.ui = { setUiOff, setVoiceCtl, megaBoom };
+
+// ---------- v33: cameras + 3D cockpit ----------
+function addNav(m) { // subtle nav lights on G47: red/green steady wingtips + white strobe
+  m.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(m), sx = (bb.max.x - bb.min.x) / 2 / m.scale.x;
+  m.userData.nav = [];
+  for (const [x, col, steady] of [[-sx, 0xff2a2a, 1], [sx, 0x2aff5a, 1], [0, 0xffffff, 0]]) { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })); sp.position.set(x, 0.3, 0); sp.scale.setScalar(0.9); sp.userData.steady = !!steady; m.add(sp); m.userData.nav.push(sp); }
+}
+const _cq = new THREE.Quaternion(), _cp = new THREE.Vector3(), _cq0 = new THREE.Quaternion(), _cp0 = new THREE.Vector3(), _cm = new THREE.Matrix4();
+const CAM_NAMES = { chase: 'CHASE CAM', cockpit: 'COCKPIT', g3: 'G3 POV', g47: 'G47 POV' };
+function setCam(c) {
+  if (c === 'g3' && !RX.drone) setDrone(true);
+  if (c === 'g47' && !RX.carrier) setCarrier(true);
+  _cp0.copy(camera.position).sub(S.pos); _cq0.copy(camera.quaternion); RX.camT = 0; /* blend start stored ship-relative so fast flight does not lag */ RX.cam = c; pop(CAM_NAMES[c], 'banked'); rxMenuSync();
+}
+let cockpit = null;
+function buildCockpit() {
+  const g = new THREE.Group();
+  const dark = new THREE.MeshStandardMaterial({ color: 0x15161a, metalness: 0.6, roughness: 0.45 });
+  const trim = new THREE.MeshStandardMaterial({ color: 0x2b2e35, metalness: 0.8, roughness: 0.3 });
+  const skin = new THREE.MeshStandardMaterial({ color: 0x8c949c, metalness: 0.05, roughness: 0.55 });
+  const box = (w, h, d, m, x, y, z, rx = 0, ry = 0, rz = 0) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); o.rotation.set(rx, ry, rz); g.add(o); return o; };
+  box(2.2, 0.32, 0.7, dark, 0, -0.62, -0.95, -0.25);              // dash
+  box(2.4, 0.06, 0.12, trim, 0, 0.62, -1.05);                     // canopy arch
+  box(0.08, 1.5, 0.1, trim, -1.0, 0.0, -1.0, 0, 0, -0.32);        // A-pillars
+  box(0.08, 1.5, 0.1, trim, 1.0, 0.0, -1.0, 0, 0, 0.32);
+  box(0.5, 0.9, 1.6, dark, -1.2, -0.75, -0.3); box(0.5, 0.9, 1.6, dark, 1.2, -0.75, -0.3); // side consoles
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 1.3), new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.05, depthWrite: false })); glass.position.set(0, 0.0, -1.08); g.add(glass);
+  // instruments: emissive canvas displays
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 64; const cx = cv.getContext('2d'); const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.15), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false })); scr.position.set(0, -0.44, -0.86); scr.rotation.x = -0.45; g.add(scr);
+  for (const x of [-0.5, 0.5]) { const d = new THREE.Mesh(new THREE.CircleGeometry(0.06, 24), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 0.9, 1.2), toneMapped: false })); d.position.set(x, -0.46, -0.9); d.rotation.x = -0.45; g.add(d); }
+  // compact F1-style yoke
+  const yoke = new THREE.Group(); yoke.position.set(0, -0.42, -0.62); g.add(yoke);
+  const yb = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.15, 0.05), trim); yoke.add(yb);
+  for (const s of [-1, 1]) { const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.2, 10), dark); grip.position.set(s * 0.25, 0, 0); yoke.add(grip); }
+  const yScr = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.06), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.2, 0.5, 0.1), toneMapped: false })); yScr.position.set(0, 0.01, 0.03); yoke.add(yScr);
+  box(0.06, 0.06, 0.3, trim, 0, -0.45, -0.78, 0.4);
+  // gray alien hands: long thin fingers, one wrapped on the yoke, one resting
+  const hand = (parent, x, y, z, curl) => { const h = new THREE.Group(); h.position.set(x, y, z); parent.add(h);
+    const palm = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), skin); palm.scale.set(1, 0.6, 1.3); h.add(palm);
+    for (let i = 0; i < 3; i++) { const f = new THREE.Mesh(new THREE.CapsuleGeometry(0.012, 0.13, 4, 8), skin); f.position.set(-0.03 + i * 0.03, 0.02, -0.08); f.rotation.x = -curl; h.add(f); }
+    const th = new THREE.Mesh(new THREE.CapsuleGeometry(0.012, 0.08, 4, 8), skin); th.position.set(0.06, 0, -0.02); th.rotation.z = 0.9; h.add(th);
+    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.03, 0.4, 4, 8), skin); arm.position.set(0, -0.05, 0.25); arm.rotation.x = Math.PI / 2 - 0.3; h.add(arm); return h; };
+  hand(yoke, -0.25, 0.02, 0.02, 1.4);
+  const rest = hand(g, 0.75, -0.52, -0.6, 0.6);
+  const cig = new THREE.Group(); cig.position.set(0, 0.03, -0.12); rest.add(cig);
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.09, 8), new THREE.MeshStandardMaterial({ color: 0xeeeeea, roughness: 0.8 })); stick.rotation.x = Math.PI / 2; cig.add(stick);
+  const ember = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: new THREE.Color(3, 0.8, 0.2), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, toneMapped: false })); ember.position.z = -0.048; ember.scale.setScalar(0.03); cig.add(ember);
+  g.traverse((o) => { o.frustumCulled = false; o.renderOrder = 20; });
+  g.position.set(0, 0.12, -0.9); g.visible = false; camera.add(g);
+  return { g, yoke, cig, ember, cx, tex, t: 0 };
+}
+function viewCamera(dt) {
+  RX.camT = Math.min(1, RX.camT + dt / 0.6);
+  const c = RX.cam;
+  if (c === 'cockpit' && !cockpit) cockpit = buildCockpit();
+  const inCock = c === 'cockpit' && S.mode !== 'crashed';
+  if (cockpit) cockpit.g.visible = inCock && RX.camT > 0.5;
+  ship.visible = S.mode === 'crashed' ? ship.visible : !(inCock && RX.camT > 0.5);
+  const near = inCock ? 0.03 : 0.5; if (camera.near !== near) { camera.near = near; camera.updateProjectionMatrix(); }
+  if (c === 'chase' && RX.camT >= 1) return;
+  // target pose
+  if (c === 'chase') { _cp.copy(camera.position); _cq.copy(camera.quaternion); }
+  else if (inCock) { ship.updateMatrixWorld(true); _cq.copy(ship.quaternion); _cp.set(0, 0.95, -1.6).applyQuaternion(_cq).add(S.pos);
+    camera.fov = damp(camera.fov, 75, 4, dt); camera.updateProjectionMatrix();
+    const y = cockpit.yoke; y.rotation.z = -S.steerS * 0.9; y.rotation.x = (S.pitchIn || 0) * 0.15;
+    cockpit.cig.visible = RX.cig; if (RX.cig) { cockpit.ember.material.opacity = 0.7 + 0.3 * Math.sin(S.t * 3.1); if (Math.random() < 0.15) { cockpit.ember.getWorldPosition(_v); dust.spawn(_v.x, _v.y + 0.02, _v.z, 0, 0.06, 0, 1.6, 0.02, 0.12, 0.25, 0.8, 0.8, 0.8, 0.3, 0); } }
+    if ((cockpit.t -= dt) <= 0) { cockpit.t = 0.2; const x = cockpit.cx; x.fillStyle = '#02080c'; x.fillRect(0, 0, 256, 64); x.fillStyle = '#5fe3ff'; x.font = 'bold 22px monospace'; x.fillText(Math.round(S.speed * 3.6).toLocaleString() + ' KM/H', 8, 26); x.fillStyle = '#ffb347'; x.fillText('ALT ' + Math.round(S.agl) + ' m  HITS ' + (S.misHits || 0) + '/7', 8, 54); cockpit.tex.needsUpdate = true; }
+  } else {
+    const o = c === 'g3' ? drone : carrier; if (!o) { RX.cam = 'chase'; return; }
+    headingFrame(S.heading); const back = c === 'g3' ? 7 : 45, up = c === 'g3' ? 1.8 : 14;
+    _cp.copy(o.p).addScaledVector(_rf, -back); _cp.y += up;
+    _cm.lookAt(_cp, _v.copy(o.p).addScaledVector(_rf, 300), camera.up); _cq.setFromRotationMatrix(_cm);
+  }
+  if (RX.camT < 1) { const k = RX.camT * RX.camT * (3 - 2 * RX.camT); camera.position.copy(_cp0).add(S.pos).lerp(_cp, k); camera.quaternion.slerpQuaternions(_cq0, _cq, k); }
+  else { camera.position.copy(_cp); camera.quaternion.copy(_cq); }
+}
+// ---------- v33: Gs SUPERMODE · 4 km freeze-destruction corridor ----------
+function gsSupermode() {
+  if (S.mode !== 'playing') return;
+  if (RX.wing === 0) setWing(1);
+  if (RX.gsupCool > 0) { pop('Gs SUPERMODE RECHARGING ' + Math.ceil(RX.gsupCool) + ' s', 'close'); return; }
+  RX.gsupCool = 25; headingFrame(S.heading); let n = 0;
+  for (const ch of chunks.values()) for (const o of ch.objs) {
+    if (o.dead || o.frozen != null) continue;
+    const dx = o.x - S.pos.x, dz = o.z - S.pos.z, along = dx * _rf.x + dz * _rf.z, lat = dx * _rr.x + dz * _rr.z;
+    if (along > 0 && along < 4000 && Math.abs(lat) < 220 && freezeObj(o, 1.0 + along / 4000 * 1.2)) n++; // frost front sweeps forward, each target holds ~1 s frozen, then cracks and shatters
+  }
+  for (const e of RX.enemies) { if (e.dead) continue; const dx = e.p.x - S.pos.x, dz = e.p.z - S.pos.z, along = dx * _rf.x + dz * _rf.z; if (along > -200 && along < 4000) { e.iceT = 1.2; for (let k = 0; k < 30; k++) glow.spawn(e.p.x + (Math.random() - 0.5) * 14, e.p.y + (Math.random() - 0.5) * 6, e.p.z + (Math.random() - 0.5) * 14, 0, 0, 0, 1.2, 3, 4, 0.9, 1.4, 2.0, 2.8, 0, 0); n++; } }
+  RX.gsupFront = { t: 0 }; S.gsupN = n;
+  for (let i = 0; i < 400; i++) { const a = Math.random() * 4000, l = (Math.random() - 0.5) * 440; const x = S.pos.x + _rf.x * a + _rr.x * l, z = S.pos.z + _rf.z * a + _rr.z * l; glow.spawn(x, world.surface(x, z) + 2 + Math.random() * 30, z, 0, 4, 0, 0.6 + a / 4000 * 1.2, 4, 10, 0.8, 1.4, 2.0, 2.8, 1.2, 0); }
+  flash(0.4); audio.boom(); pop('Gs SUPERMODE · 4 KM FREEZE CORRIDOR · ' + n + ' TARGETS', 'unlock'); rxSay('Supermode. Freeze corridor.', 'gsup'); rxMenuSync();
+}
+function setPhase(p) { RX.phase = p; if ((p > 0) !== RX.ghost) setGhost(p > 0); pop(['PHASE OFF', 'PHASE · ME ONLY · PASS THROUGH TERRAIN', 'PHASE · ALL FRIENDLY JETS'][p], 'unlock'); rxMenuSync(); }
+// ---------- v33: AI ANALYSIS · 10 s horizon over procedural data ----------
+function aiChunk(i) { const ch = chunks.get(i); if (ch) return ch.objs; let o = AIC.get(i); if (!o) { if (AIC.size > 300) AIC.delete(AIC.keys().next().value); RX.noPatch = true; o = genChunkContent(world, i).objs; RX.noPatch = false; const dead = DESTROYED.get(i); if (dead) o.forEach((q, k) => { if (dead.has(k)) q.dead = true; }); AIC.set(i, o); } return o; }
+function aiAnalysis() {
+  const H = 10, kmh = S.speed * 3.6, scanKm = kmh / 360, L = scanKm * 1000; // scanDistanceKm = speedKmH / 360 (= 10 s of travel)
+  const vx = S.vel.x, vy = S.vel.y, vz = S.vel.z, sp = Math.max(S.speed, 1);
+  let what = null, tti = Infinity;
+  const c0 = Math.floor(-S.pos.z / CHUNK_L), c1 = Math.floor((-S.pos.z + L) / CHUNK_L); let gen = 0;
+  for (let i = c0; i <= c1; i++) {
+    if (!chunks.has(i) && !AIC.has(i)) { if (gen++ > 4) break; } // budget: a few procedural queries per scan
+    for (const o of aiChunk(i)) {
+      if (o.dead || (RX.ice && (o.type === 'tree' || o.type === 'jtree')) || (o.type === 'boulder' && o.r < 3)) continue;
+      const dx = o.x - S.pos.x, dz = o.z - S.pos.z, t = (dx * vx + dz * vz) / (sp * sp); if (t <= 0 || t > H || t >= tti) continue;
+      const cx = S.pos.x + vx * t - o.x, cz = S.pos.z + vz * t - o.z, cy = S.pos.y + vy * t;
+      if (cx * cx + cz * cz < (targetRadius(o) + 8) ** 2 && cy < (o.y || world.surface(o.x, o.z)) + (o.h || o.r * 2) + 6) { tti = t; what = (TARGET_NAME[o.type] || 'OBSTACLE') + ' COLLISION'; }
+    }
+  }
+  for (let k = 1; k <= 40; k++) { const t = k * H / 40; if (t >= tti) break; const x = S.pos.x + vx * t, z = S.pos.z + vz * t; if (S.pos.y + vy * t < world.surface(x, z) + 3) { tti = t; what = 'TERRAIN COLLISION'; break; } }
+  for (const e of RX.enemies) { if (e.dead) continue; const rx = e.p.x - S.pos.x, ry = e.p.y - S.pos.y, rz = e.p.z - S.pos.z, wx = e.v.x - vx, wy = e.v.y - vy, wz = e.v.z - vz, w2 = wx * wx + wy * wy + wz * wz; if (w2 < 1) continue; const t = -(rx * wx + ry * wy + rz * wz) / w2; if (t <= 0 || t > H || t >= tti) continue; const d = Math.hypot(rx + wx * t, ry + wy * t, rz + wz * t); if (d < 40) { tti = t; what = 'HOSTILE CLOSING'; } }
+  for (const s of shotPool) { if (!s.on) continue; const rx = s.p.x - S.pos.x, ry = s.p.y - S.pos.y, rz = s.p.z - S.pos.z, wx = s.v.x - vx, wy = s.v.y - vy, wz = s.v.z - vz, w2 = wx * wx + wy * wy + wz * wz; const t = w2 > 1 ? -(rx * wx + ry * wy + rz * wz) / w2 : -1; if (t > 0 && t < tti && Math.hypot(rx + wx * t, ry + wy * t, rz + wz * t) < 25) { tti = t; what = 'MISSILE INBOUND'; } }
+  const box = $('aiBox'); box.classList.remove('hidden');
+  if (tti === Infinity) { box.className = ''; box.textContent = 'AI ANALYSIS · ' + scanKm.toFixed(1) + ' KM / 10 s · CLEAR'; RX.aiLast = null; return '<b class="ok">AI · ' + scanKm.toFixed(1) + ' KM · PATH CLEAR</b>'; }
+  // safest escape: evaluate clearance of each manoeuvre with the full flight model
+  const T = clamp(tti, 1.5, 4); let best = 'HOLD', bh = -1;
+  for (const [st, p, lbl] of [[-0.9, 0, '◀ LEFT'], [0.9, 0, 'RIGHT ▶'], [0, 1, '▲ CLIMB'], [0, -0.6, '▼ DIVE']]) { const q = predict(st, p, T, 12, 3.5); const sc = (q.hit === Infinity ? T * 10 : q.hit) + Math.min(q.minClr || 0, 30) * 0.05; if (sc > bh) { bh = sc; best = lbl; } }
+  RX.aiLast = { what, tti, best };
+  box.className = 'bad'; box.textContent = what + ' ' + tti.toFixed(1) + 's · ESCAPE ' + best;
+  return '<b class="bad">AI · ' + what + ' ' + tti.toFixed(1) + 's · ' + best + '</b>';
+}
+window.__game.v33 = { setCam, gsSupermode, setPhase, aiAnalysis, get cockpit() { return cockpit; }, get wingmen() { return wingmen; }, get carrier() { return carrier; }, get drone() { return drone; }, shotPool, misPool, DESTROYED };
 window.__game.ready = true;
 if (TEST) {
   S.noCollide = !params.has('collide');
@@ -2956,7 +3149,7 @@ window.__game.simAP = (seconds, dt = 1 / 30) => {
   for (let t = 0; t < seconds && S.mode === 'playing'; t += dt) {
     S.t += dt; rxUpdateZones(); updateHazards(dt); if (RX.instDirty) { RX.instDirty = false; rebuildInstances(); }
     const a = performance.now();
-    const nSub = Math.min(16, Math.max(1, Math.ceil(dt / (1 / 120)), Math.ceil(S.speed * dt / 22))), sdt = dt / nSub; S.apDt = dt;
+    const nSub = Math.min(40, Math.max(1, Math.ceil(dt / (1 / 120)), Math.ceil(S.speed * dt / 22))), sdt = dt / nSub; S.apDt = dt;
     let dead = false;
     for (let j = 0; j < nSub; j++) { S.apSub = j > 0; const b = performance.now(); updateFlight(sdt); if (j === 0) ms += performance.now() - b; if (!S.noCollide && resolveCollisions(sdt)) { crash(); dead = true; break; } }
     S.apSub = false;

@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=32">
+<link rel="stylesheet" href="style.css?v=33">
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
 </head>
 <body>
@@ -58,22 +58,18 @@
   <button id="rxExit" class="ui hidden">✕ EXIT MISSILE CAM</button>
   <div id="rxPip" class="hidden"><span id="rxPipL">LIVE</span></div>
   <div id="rxFlash"></div>
-  <div id="rxCard" class="ui hidden"><b>☄ SCOUT: STRIKE READY</b><span>Huge blast clears ~3.5 km of route ahead · 2 min cooldown</span><div><button id="rxCardYes" class="ui mx on">APPROVE · Y</button><button id="rxCardNo" class="ui mx">DECLINE</button></div></div>
+  <div id="rxCard" class="ui hidden"><b>☄ G3: BIG-OBSTACLE STRIKE READY</b><span>Clears ~3.5 km of route ahead · 2 min cooldown</span><div><button id="rxCardYes" class="ui mx on">APPROVE · Y</button><button id="rxCardNo" class="ui mx">DECLINE</button></div></div>
   <div id="rxScrim" class="hidden"></div>
   <div id="rxMenu" class="ui hidden">
-    <div class="mh">FLIGHT MODES <button id="rxMenuX" class="ui" aria-label="Close">✕</button></div>
-    <button id="mxWing" class="ui mx">WINGMEN OFF</button><button id="mxWave" class="ui mx">❄ FREEZE SHOCKWAVE · Q</button>
-    <button id="mxCam" class="ui mx">🎥 MISSILE CAM · C</button><button id="mxWar" class="ui mx">WARHEAD · HIGH-EXPLOSIVE</button>
-    <button id="mxUltra" class="ui mx">ULTRA · OFF</button><button id="mxBlast" class="ui mx">⚡ BLAST → PORTAL · B</button>
-    <button id="mxLand" class="ui mx">LAND / TAKE OFF · L</button><button id="mxGhost" class="ui mx">GHOST · OFF</button>
-    <button id="mxScan" class="ui mx">AI SCANNER · ON</button><button id="mxVoice" class="ui mx">VOICE · ON</button>
-    <button id="mxG" class="ui mx">G-EFFECTS · ON</button><button id="mxSwipe" class="ui mx">SWIPE STEER · OFF</button><button id="mxVc" class="ui mx">🎙 VOICE CONTROL · OFF</button>
-    <div class="mh">ESCORTS</div>
-    <button id="mxCarrier" class="ui mx">CARRIER ESCORT · OFF</button><button id="mxDrone" class="ui mx">SCOUT DRONE · OFF</button>
-    <button id="mxPip" class="ui mx">FEED · OFF</button>
-    <div class="mk">Keys: G wingmen · Q wave · C missile cam · V warhead · U ultra · B blast · L land · P ghost · I scanner · O voice · K carrier · J drone · N feed · H swipe steer · Y approve strike · M / Esc menu. Swipe sideways or tap outside to close.</div>
+    <div class="mh">CONTROLS <span>swipe down to close</span> <button id="rxMenuX" class="ui" aria-label="Close">✕</button></div>
+    <div class="tg"><div class="gh">FLIGHT</div><button id="mxAuto" class="ui mx">AUTOPILOT</button><button id="mxSafe" class="ui mx">SAFE</button><button id="mxUltra" class="ui mx">ULTRA · OFF</button><button id="mxBlast" class="ui mx">⚡ BLAST · B</button><button id="mxLand" class="ui mx">LAND · L</button><button id="mxSwipe" class="ui mx">SWIPE STEER · OFF</button></div>
+    <div class="tg"><div class="gh">PROTECTION</div><button id="mxSuper" class="ui mx">SUPERSAFE · OFF</button><button id="mxX" class="ui mx">X SURVIVAL · OFF</button><button id="mxPhase" class="ui mx">PHASE · OFF</button><button id="mxSmart" class="ui mx">SMART AVOID · OFF</button></div>
+    <div class="tg"><div class="gh">SQUAD</div><button id="mxWing" class="ui mx">Gs OFF</button><button id="mxGsup" class="ui mx">Gs SUPERMODE</button><button id="mxDrone" class="ui mx">G3 · OFF</button><button id="mxG3far" class="ui mx">G3 · NEAR</button><button id="mxG3req" class="ui mx">G3 STRIKE REQUEST</button><button id="mxCarrier" class="ui mx">CALL G47</button><button id="mxHelp" class="ui mx">G47 HELPERS · ON</button></div>
+    <div class="tg"><div class="gh">WEAPONS</div><button id="mxFire" class="ui mx">FIRE</button><button id="mxSmartM" class="ui mx">SMART MISSILES · ON</button><button id="mxWar" class="ui mx">FREEZE MISSILE · OFF</button><button id="mxCam" class="ui mx">🎥 MISSILE POV · C</button><button id="mxWave" class="ui mx">❄ FREEZE WAVE · Q</button></div>
+    <div class="tg"><div class="gh">CAMERA</div><button id="mxCchase" class="ui mx on">CHASE</button><button id="mxCcock" class="ui mx">COCKPIT</button><button id="mxCg3" class="ui mx">G3 POV</button><button id="mxCg47" class="ui mx">G47 POV</button><button id="mxPip" class="ui mx">FEED · OFF</button></div>
+    <div class="tg"><div class="gh">OTHER</div><button id="mxScan" class="ui mx">AI ANALYSIS · ON</button><button id="mxSound" class="ui mx">SOUND · ON</button><button id="mxCig" class="ui mx">CIGARETTE · OFF</button><button id="mxVc" class="ui mx">🎙 VOICE CONTROL · OFF</button><button id="mxVoice" class="ui mx">CALLOUTS · ON</button><button id="mxG" class="ui mx">G-EFFECTS · ON</button><button id="mxGhost" class="ui mx hidden">GHOST</button></div>
   </div>
-  <button id="trayHandle" class="ui" aria-label="Hide/show controls">‹</button>
+  <button id="trayHandle" class="ui" aria-label="Hide/show controls">‹</button><button id="trayTab" class="ui" aria-label="Open control tray">&gt;</button>
   <div id="hint">Tilt to steer · right bar = throttle · left bar = climb / dive</div>
 </div>
 
@@ -84,7 +80,7 @@
     <button id="startBtn" class="ui">TAP TO START</button>
     <div class="how">
       <div><b>Tilt</b> phone left / right to bank · forward / back to dive / climb</div>
-      <div><b>Right bar</b> = throttle (max 8700 km/h) · <b>left bar</b> = climb ▲ / dive ▼, release to level · use both at once</div>
+      <div><b>Right bar</b> = throttle (max 35,620 km/h · ULTRA 124,700) · <b>left bar</b> = climb ▲ / dive ▼, release to level · use both at once</div>
       <div>Skim <b class="cy">low &amp; fast</b>, shave past spires for <b class="cy">combos</b> · break Mach 1</div>
       <div class="desk">Desktop: A/D or ←/→ steer · ↑/↓ pitch · W/S or drag/scroll throttle · M modes menu</div>
       <div><b class="cy">New:</b> sky deck &amp; upper world · wingmen · missile cam · ULTRA &amp; BLAST portal to the Ice Age · hostile jets · G-meter — tap <b>☰ MODES</b></div>
@@ -132,8 +128,9 @@
   <p>Draco decoder © Google (Apache-2.0). All sounds synthesized live with WebAudio.</p>
   <button id="aboutClose" class="ui chip">Close</button>
 </div></div>
+<div id="aiBox" class="hidden"></div>
 <div id="rotate" class="hidden">↻ Landscape recommended</div>
 <div id="err" class="hidden"></div>
-<script type="module" src="js/main.js?v=32"></script>
+<script type="module" src="js/main.js?v=33"></script>
 </body>
 </html>

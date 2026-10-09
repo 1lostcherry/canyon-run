@@ -252,3 +252,29 @@ button.ui { -webkit-appearance: none; appearance: none; font-family: inherit; cu
 /* v32: hide/show tray with persistent restore handle */
 #trayHandle { position: absolute; left: calc(var(--sal, 0px) + 58px); bottom: calc(var(--sab, 0px) + 52px); z-index: 40; width: 34px; height: 34px; border-radius: 17px; background: rgba(20,8,0,0.6); color: #ffd9a8; border: 1px solid rgba(255,190,120,0.55); font: 700 18px system-ui; pointer-events: auto; }
 body.ui-off #tl, body.ui-off #tc, body.ui-off #tr, body.ui-off #thrBar, body.ui-off #fireBtn, body.ui-off #rxQuick, body.ui-off #rxInfo, body.ui-off #rxPip, body.ui-off #rxAmmo, body.ui-off #modes, body.ui-off #hint, body.ui-off #rxMenu, body.ui-off #rxScrim { display: none !important; }
+
+/* v33: bottom horizontally scrollable control tray */
+#rxMenu { top: auto !important; left: calc(var(--sal) + 8px) !important; right: calc(var(--sar) + 8px) !important; bottom: calc(var(--sab) + 6px); width: auto !important; min-width: 0 !important; max-height: 46vh !important; display: flex !important; flex-direction: row; flex-wrap: nowrap; gap: 8px; overflow-x: auto; overflow-y: hidden; touch-action: pan-x; padding: 8px 10px; grid-template-columns: none !important; }
+#rxMenu.hidden { display: none !important; }
+#rxMenu .mh { position: sticky; left: 0; flex: 0 0 64px; flex-direction: column; justify-content: center; gap: 6px; font-size: 9px; letter-spacing: 1.5px; text-align: center; background: rgba(20,12,6,0.95); z-index: 2; }
+#rxMenu .tg { flex: 0 0 auto; display: grid; grid-auto-flow: column; grid-template-rows: auto 1fr 1fr; gap: 5px; padding: 0 8px; border-left: 1px solid rgba(255,207,138,0.2); }
+#rxMenu .gh { grid-row: 1; grid-column: 1 / span 9; font-size: 9px; font-weight: 900; letter-spacing: 2px; color: #ffcf8a; }
+#rxMenu .mx { min-width: 92px; padding: 8px 6px; min-height: 36px; }
+#rxMenu .mx.hidden { display: none; }
+#trayTab { position: absolute; left: calc(var(--sal) + 58px); bottom: calc(var(--sab) + 92px); z-index: 40; width: 34px; height: 34px; border-radius: 17px; background: rgba(76,196,255,0.25); color: #bff3ff; border: 1px solid rgba(120,220,255,0.6); font: 800 16px system-ui; pointer-events: auto; }
+body.ui-off #trayTab { display: none; }
+#rxCard { border: 2px solid #ff3b3b !important; }
+#rxCardYes { background: linear-gradient(180deg, #ff6a6a, #d61f1f) !important; color: #fff !important; }
+#aiBox { position: absolute; left: 50%; transform: translateX(-50%); top: calc(var(--sat) + 96px); z-index: 25; font: 800 11px system-ui; letter-spacing: 1px; color: #bff3ff; background: rgba(0,20,30,0.55); padding: 4px 10px; border-radius: 8px; pointer-events: none; white-space: nowrap; }
+#aiBox.bad { color: #ffb0a0; background: rgba(60,0,0,0.6); }
+#aiBox.hidden { display: none; }
+/* portrait HUD de-overlap */
+@media (orientation: portrait) {
+  #tc { top: calc(var(--sat) + 6px); }
+  #tc .sub, #tc .sub2 { flex-wrap: wrap; justify-content: center; max-width: 92vw; }
+  #tl { top: calc(var(--sat) + 118px) !important; transform: scale(0.85); transform-origin: top left; }
+  #tr { top: calc(var(--sat) + 118px) !important; transform: scale(0.85); transform-origin: top right; }
+  #skim, #storm, #hint { top: calc(var(--sat) + 300px) !important; }
+  #aiBox { top: calc(var(--sat) + 280px); white-space: normal; max-width: 80vw; text-align: center; }
+  #rxInfo { bottom: calc(var(--sab) + 150px); }
+}
