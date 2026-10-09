@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Canyon Run">
+<meta name="theme-color" content="#1a0d05">
+<meta name="format-detection" content="telephone=no">
+<title>Canyon Run</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="loading"><div class="lt">CANYON RUN</div><div class="lb"><i id="loadBar"></i></div><span id="loadTxt">Loading 0%</span></div>
+<div id="vignette"></div>
+<div id="flash"></div>
+<div id="pulse"></div>
+<div id="hits"></div>
+<div id="whiteout"></div>
+<div id="rxGv"></div>
+<div id="rxStatic"></div>
+
+<div id="hud" class="hidden">
+  <div id="tl" class="panel">
+    <div class="lbl">SCORE</div><div id="score" class="big">0</div>
+    <div class="row"><span class="lbl">BEST</span> <span id="best">0</span></div>
+    <div id="hpBox" title="Hull integrity"><div class="hpl"><span>L</span><i><b id="hpL"></b></i></div><div class="hpl"><span>HULL</span><i><b id="hpB"></b></i></div><div class="hpl"><span>R</span><i><b id="hpR"></b></i></div></div>
+    <div id="engBox"><span>ENGINE LOAD</span><i><b id="engFill"></b></i></div>
+  </div>
+  <div id="tc">
+    <div id="speed">0</div>
+    <div class="row sub"><span>KM/H</span><span id="ms">0.0 m/s</span><span id="mach">M 0.00</span><span id="agl">ALT 0 m</span><span id="gMeter">G +1.0</span></div>
+    <div class="row sub2"><span id="dist">0.00 km</span><span id="ftime">00:00</span><span id="top">TOP 0</span><span id="biome">DESERT CANYON</span></div>
+  </div>
+  <div id="tr" class="panel">
+    <div id="comboBox"><span class="lbl">COMBO</span> <span id="combo">x1.0</span><div id="comboTrack"><div id="comboBar"></div></div></div>
+    <div class="btns"><button id="apBtn" class="ui hb">AUTO</button><button id="safeBtn" class="ui hb">SAFE</button><button id="recal" class="ui hb" aria-label="Recalibrate tilt">⟲ LEVEL</button><button id="rxTab" class="ui hb" aria-label="More modes">☰ MODES</button></div>
+  </div>
+  <div id="altBar"><div id="altMid"></div><div id="altFill"></div><div id="altKnob"></div><div id="altLbl">ALT</div><div id="altUp">▲</div><div id="altDn">▼</div><div id="altPct">LEVEL</div></div>
+  <div id="lockRet"><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i><b>LOCK</b><span></span><em id="misSpd"></em></div>
+  <button id="fireBtn" class="ui" aria-label="Fire missile"><span>FIRE</span><div id="ammoPips"><i></i><i></i><i></i><i></i><i></i><i></i></div></button>
+  <div id="thrBar"><div id="thrFill"></div><div id="thrMach"></div><div id="thrLbl">THR</div><div id="thrPct">35%</div></div>
+  <div id="storm">⚠ DUST STORM</div>
+  <div id="skim">SKIMMING ×1.5</div>
+  <div id="modes"><div id="apInd" class="hidden">AUTOPILOT · SCORE ×0.25</div><div id="safeInd" class="hidden">SAFE MODE</div></div>
+  <div id="frostV"></div>
+  <div id="pops"></div>
+  <div id="rxInfo"><div id="rxHole"></div><div id="rxScan"></div></div>
+  <div id="rxQuick"><button id="rxWaveBtn" class="ui rq">❄ WAVE</button><button id="rxCamBtn" class="ui rq">🎥 MSL CAM</button><button id="rxLandBtn" class="ui rq hidden">LAND</button></div>
+  <span id="rxAmmo"></span>
+  <button id="rxExit" class="ui hidden">✕ EXIT MISSILE CAM</button>
+  <div id="rxMenu" class="ui hidden">
+    <div class="mh">FLIGHT MODES <span>M</span></div>
+    <button id="mxWing" class="ui mx">WINGMEN OFF</button><button id="mxWave" class="ui mx">❄ FREEZE SHOCKWAVE · Q</button>
+    <button id="mxCam" class="ui mx">🎥 MISSILE CAM · C</button><button id="mxWar" class="ui mx">WARHEAD · HIGH-EXPLOSIVE</button>
+    <button id="mxUltra" class="ui mx">ULTRA · OFF</button><button id="mxBlast" class="ui mx">⚡ BLAST → PORTAL · B</button>
+    <button id="mxLand" class="ui mx">LAND / TAKE OFF · L</button><button id="mxGhost" class="ui mx">GHOST · OFF</button>
+    <button id="mxScan" class="ui mx">AI SCANNER · ON</button><button id="mxVoice" class="ui mx">VOICE · ON</button>
+    <button id="mxG" class="ui mx">G-EFFECTS · ON</button>
+    <div class="mk">Keys: G wingmen · Q wave · C missile cam · V warhead · U ultra · B blast · L land · P ghost · I scanner · O voice · M menu</div>
+  </div>
+  <div id="hint">Tilt to steer · right bar = throttle · left bar = climb / dive</div>
+</div>
+
+<div id="start" class="overlay">
+  <div class="inner">
+    <div class="kicker">ARRAKIS DEEP · LOW-LEVEL RUN</div>
+    <h1>CANYON<span>RUN</span></h1>
+    <button id="startBtn" class="ui">TAP TO START</button>
+    <div class="how">
+      <div><b>Tilt</b> phone left / right to bank · forward / back to dive / climb</div>
+      <div><b>Right bar</b> = throttle (max 8700 km/h) · <b>left bar</b> = climb ▲ / dive ▼, release to level · use both at once</div>
+      <div>Skim <b class="cy">low &amp; fast</b>, shave past spires for <b class="cy">combos</b> · break Mach 1</div>
+      <div class="desk">Desktop: A/D or ←/→ steer · ↑/↓ pitch · W/S or drag/scroll throttle · M modes menu</div>
+      <div><b class="cy">New:</b> sky deck &amp; upper world · wingmen · missile cam · ULTRA &amp; BLAST portal to the Ice Age · hostile jets · G-meter — tap <b>☰ MODES</b></div>
+    </div>
+    <div class="opts">
+      <button id="pitchBtn" class="ui chip">Tilt pitch: normal</button>
+      <button id="skinBtn" class="ui chip">Ship: Obsidian ▸</button>
+      <button id="safeChip" class="ui chip">Safe mode: off</button>
+      <button id="modeChip" class="ui chip">Mode: Endless</button>
+      <button id="setBtn" class="ui chip">⚙ Settings</button><button id="aboutBtn" class="ui chip">ⓘ About</button>
+    </div>
+    <div class="hold"><span id="skinNext"></span> · Hold the phone the way you like — that pose becomes level.</div>
+    <div class="hold" id="lifeStart"></div>
+    <div class="hold" id="achStart"></div>
+    <div id="a2hs">Best in landscape. On iPhone tap <b>Share → Add to Home Screen</b> to play truly fullscreen.</div>
+  </div>
+</div>
+
+<div id="crash" class="overlay hidden">
+  <div class="inner">
+    <div class="kicker red" id="cCause">HULL BREACH</div>
+    <h2>CRASHED</h2>
+    <div id="newBest" class="hidden">NEW BEST!</div>
+    <div class="stats"><div><span>SCORE</span><b id="cScore">0</b></div><div><span>DISTANCE</span><b id="cDist">0</b></div><div><span>BEST</span><b id="cBest">0</b></div><div><span>BEST COMBO</span><b id="cCombo">x1</b></div></div>
+    <div class="stats small"><div><span>TIME</span><b id="cTime">00:00</b></div><div><span>TOP SPEED</span><b id="cTop">0</b></div><div><span>AVG SPEED</span><b id="cAvg">0</b></div><div><span>NEAR MISSES</span><b id="cNear">0</b></div><div><span>SCRAPES</span><b id="cScr">0</b></div><div><span>LIFETIME</span><b id="cLife">0 km</b></div></div>
+    <div class="hold" id="dailyRes"></div>
+    <button id="againBtn" class="ui">TAP TO FLY AGAIN</button>
+    <div class="opts"><button id="skinBtn2" class="ui chip">Ship</button></div>
+    <div class="hold" id="skinNext2"></div>
+  </div>
+</div>
+<div id="settings" class="hidden"><div class="card">
+  <h3>SETTINGS</h3>
+  <label>Tilt sensitivity <span id="sensVal">1.0×</span><input id="sens" type="range" min="0.5" max="2" step="0.1"></label>
+  <label>Sound volume <span id="volVal">85%</span><input id="vol" type="range" min="0" max="1" step="0.05"></label>
+  <div class="opts"><button id="qualChip" class="ui chip">Graphics: ULTRA</button><button id="adaptChip" class="ui chip">Emergency auto-downscale: ON</button><button id="voiceChip" class="ui chip">Voice callouts: ON</button></div>
+  <button id="setClose" class="ui chip">Done</button>
+</div></div>
+<div id="about" class="hidden"><div class="card">
+  <h3>ABOUT · CREDITS</h3>
+  <p><b>Canyon Run</b> — procedural endless flight, built with three.js (MIT).</p>
+  <p>Gunship modelled procedurally in Blender (bpy script, AO baked in Cycles), exported as Draco-compressed glTF.</p>
+  <p>CC0 textures from <b>Poly Haven</b> (polyhaven.com): Rock Face, Red Sand, Aerial Grass Rock — by Rob Tuytel / Poly Haven team.</p>
+  <p>CC0 HDRI from <b>Poly Haven</b>: “Kloofendal 48d Partly Cloudy (Pure Sky)” by Greg Zaal.</p>
+  <p>Draco decoder © Google (Apache-2.0). All sounds synthesized live with WebAudio.</p>
+  <button id="aboutClose" class="ui chip">Close</button>
+</div></div>
+<div id="rotate" class="hidden">↻ Landscape recommended</div>
+<div id="err" class="hidden"></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
