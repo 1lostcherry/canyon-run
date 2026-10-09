@@ -278,3 +278,6 @@ body.ui-off #trayTab { display: none; }
   #aiBox { top: calc(var(--sat) + 280px); white-space: normal; max-width: 80vw; text-align: center; }
   #rxInfo { bottom: calc(var(--sab) + 150px); }
 }
+
+#fzBonus { position: absolute; left: 50%; transform: translateX(-50%); top: calc(var(--sat) + 122px); z-index: 25; font: 900 13px system-ui; letter-spacing: 1.5px; color: #dff6ff; background: rgba(40,140,220,0.45); padding: 4px 12px; border-radius: 10px; pointer-events: none; }
+#fzBonus.hidden { display: none; }
