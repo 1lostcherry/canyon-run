@@ -29,7 +29,7 @@ export class Controls {
     this.pitchMode = +(localStorage.getItem('canyon.pitchMode') ?? 0); // 0 normal, 1 inverted, 2 off
     this.keys = {};
     this.touchSteer = 0; this.touchPitch = 0; this.swT = [0, 0]; this.swipeSteer = localStorage.getItem('canyon.swipe') === '1';
-    this.drag = null;
+    this.drag = null; this.rollCmd = 0;
     this.enabled = false;
     this.lastOrientEvent = 0;
 
@@ -58,6 +58,9 @@ export class Controls {
         for (const d of this.drags.values()) if (d.kind === 'thr' || d.kind === 'swipe') return;
         this.drags.set(e.pointerId, { kind: 'thr', id: e.pointerId, barTop: tb.top, barH: tb.height });
         this.throttle = clamp(1 - (e.clientY - tb.top) / tb.height, 0, 1);
+      } else if (this.inRollZone(e.clientY)) { // upper ~30% of the gameplay area: horizontal drag = roll angle
+        for (const d of this.drags.values()) if (d.kind === 'roll') return;
+        this.drags.set(e.pointerId, { kind: 'roll', id: e.pointerId, x0: e.clientX, r0: this.rollCmd });
       } else {
         for (const d of this.drags.values()) if (d.kind === 'thr' || d.kind === 'swipe') return;
         this.drags.set(e.pointerId, { kind: 'swipe', id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: this.throttle });
@@ -66,6 +69,7 @@ export class Controls {
     });
     el.addEventListener('pointermove', (e) => {
       const d = this.drags.get(e.pointerId); if (!d) return;
+      if (d.kind === 'roll') { this.rollCmd = clamp(d.r0 + (e.clientX - d.x0) / (innerWidth * 0.35) * Math.PI, -Math.PI, Math.PI); return; }
       if (d.kind === 'alt') this.setAlt(e.clientY, d);
       else if (d.kind === 'thr') this.throttle = clamp(1 - (e.clientY - d.barTop) / d.barH, 0, 1);
       else {
@@ -82,6 +86,7 @@ export class Controls {
     const end = (e) => {
       const d = this.drags.get(e.pointerId); if (!d) return;
       this.drags.delete(e.pointerId);
+      if (d.kind === 'roll') this.rollCmd = 0; // release: return to level
       if (d.kind === 'alt') this.altStick = 0; // spring back to centre = level hold
       if (d.kind === 'swipe') { this.touchSteer = 0; this.swT[0] = this.swT[1] = 0; if (this.swS) this.swS[0] = this.swS[1] = 0; } // spring back to neutral
       this.drag = this.drags.size ? [...this.drags.values()][0] : null;
@@ -89,6 +94,7 @@ export class Controls {
     el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
     el.addEventListener('wheel', (e) => { if (this.enabled) this.throttle = clamp(this.throttle - e.deltaY * 0.0008, 0, 1); }, { passive: true });
   }
+  inRollZone(y) { const top = this.hudTop || 96, h = innerHeight - top; return y > top && y < top + h * 0.3; }
   // centre = 0 (level), top = +1 (full climb), bottom = -1 (full dive); small dead-zone around centre
   setAlt(y, d) {
     const v = clamp(1 - 2 * (y - d.top) / d.h, -1, 1), a = Math.abs(v);

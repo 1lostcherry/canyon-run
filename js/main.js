@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=33';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=33';
-import { loadAssets } from './assets.js?v=33';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=34';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=34';
+import { loadAssets } from './assets.js?v=34';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=33';
-import { GpuDust } from './gpudust.js?v=33';
-import { PostFX } from './postfx.js?v=33';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=33';
-import { GameAudio } from './audio.js?v=33';
-import { Controls } from './input.js?v=33';
+import { Grass } from './grass.js?v=34';
+import { GpuDust } from './gpudust.js?v=34';
+import { PostFX } from './postfx.js?v=34';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=34';
+import { GameAudio } from './audio.js?v=34';
+import { Controls } from './input.js?v=34';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -827,7 +827,7 @@ function barrelRoll() {
   addEventListener('pointerdown', (e) => {
     if (isUI(e.target) || S.mode !== 'playing' || controls.onSlider(e.clientX)) return;
     const now = performance.now();
-    if (now - lastTap < 300 && Math.hypot(e.clientX - lx, e.clientY - ly) < 50) { barrelRoll(); lastTap = 0; return; }
+    if (localStorage.getItem('canyon.dtap') === '1' && now - lastTap < 300 && Math.hypot(e.clientX - lx, e.clientY - ly) < 50) { barrelRoll(); lastTap = 0; return; }
     lastTap = now; lx = e.clientX; ly = e.clientY;
   });
   addEventListener('keydown', (e) => { if (e.code === 'KeyR') barrelRoll(); });
@@ -876,6 +876,7 @@ function setSafe(on) {
 
 function updateFlight(dt) {
   if (rxFlightOverride(dt)) return { thr: 0, spdN: spdNf(S.speed) };
+  if (S.car && S.mode === 'playing' && carFlight(dt)) return { thr: controls.throttle, spdN: spdNf(S.speed) };
   if (RX.blast && S.mode === 'playing') {
     S.speed = BLAST_KMH / 3.6; headingFrame(S.heading); (S.prevPos || (S.prevPos = new THREE.Vector3())).copy(S.pos);
     S.pos.addScaledVector(_rf, S.speed * dt); const g = world.surface(S.pos.x, S.pos.z); S.pos.y = Math.max(damp(S.pos.y, Math.min(g + 260, CEILING - 40), 3, dt), g + 60);
@@ -936,7 +937,8 @@ function updateFlight(dt) {
   ship.position.copy(S.pos);
   let rollAnim = 0;
   if (S.rollT > 0) { S.rollT -= dt; const u = 1 - Math.max(S.rollT, 0) / 0.75; rollAnim = S.rollDir * Math.PI * 2 * (u * u * (3 - 2 * u)); }
-  ship.rotation.set(S.pitch + (S.speed - S.prevSpeed) / dt * -0.0006, S.heading + S.steerS * 0.06, S.roll + rollAnim);
+  S.gRoll = damp(S.gRoll || 0, controls.rollCmd || 0, 8, dt); // gesture roll: attitude only, heading is untouched (never a U-turn)
+  ship.rotation.set(S.pitch + (S.speed - S.prevSpeed) / dt * -0.0006, S.heading + S.steerS * 0.06, S.roll + rollAnim + S.gRoll);
   S.dist = Math.max(S.dist, -S.pos.z);
   if (S.mode === 'playing' && !S.boom100 && S.speed * 3.6 >= 100000) { S.boom100 = true; S.boom100N = (S.boom100N || 0) + 1; megaBoom(); }
   if (S.mode === 'playing') { const kk = S.speed * 3.6, m = kk >= 37000 ? 3 : kk >= 5200 ? 2 : kk >= 1200 ? 1 : 0; if (m > (S.machStep || 0)) { S.machStep = m; audio.boom(); shock.spawn(S.pos.clone(), _v.copy(S.vel).normalize().clone(), 60 + m * 30, 0.6, new THREE.Color(1.2, 1.1, 1), 0.6); } else if (m < (S.machStep || 0)) S.machStep = m; }
@@ -990,6 +992,7 @@ function findContacts() {
 const ZONE_NAME = { L: 'LEFT WING', R: 'RIGHT WING', B: 'HULL', N: 'NOSE' };
 function resolveCollisions(dt) {
   if (RX.blast) return false; // BLAST shield
+  if (S.car && S.car.k > 0.5) return carCollide();
   if (RX.super && S.mode === 'playing') for (const o of nearObs) { // BLACKHAWK SUPERSAFE: cut a channel through anything in the way
     if (o.dead) continue; const dx = o.x - S.pos.x, dz = o.z - S.pos.z, R = targetRadius(o) + 10;
     if (dx * dx + dz * dz < R * R && S.pos.y < (o.y || 0) + (o.h || o.r * 2) + 8) { _v.set(o.x, S.pos.y, o.z); destroyTarget(o, _v); S.superCuts = (S.superCuts || 0) + 1; }
@@ -1610,7 +1613,7 @@ function updateCamera(dt, spdN) {
   S.camY = damp(S.camY, S.pos.y, 6, dt);
   S.dolly = damp(S.dolly || 0, clamp(accel * 0.012, -2, 4), 3, dt);
   const portrait = camera.aspect < 1;
-  const back = (portrait ? 25 : 16) + S.dolly + spdN * 2.5, up = (portrait ? 6.5 : 5.5);
+  const ck = S.car ? S.car.k : 0, back = ((portrait ? 25 : 16) + S.dolly + spdN * 2.5) * (1 - 0.05 * ck), up = (portrait ? 6.5 : 5.5) * (1 - 0.15 * ck);
   const cy = Math.cos(S.camYaw), sy = Math.sin(S.camYaw);
   if (!crashed) {
     camera.position.set(S.pos.x + sy * back, S.camY + up + Math.sin(S.camPitch) * -back * 0.4, S.pos.z + cy * back);
@@ -1623,7 +1626,7 @@ function updateCamera(dt, spdN) {
   const look = _v.set(S.pos.x - sy * 32, S.pos.y - 1.5 + Math.sin(S.camPitch) * 32, S.pos.z - cy * 32);
   if (crashed) look.copy(S.pos);
   camera.lookAt(look);
-  camera.rotateZ(S.roll * 0.22);
+  camera.rotateZ(S.roll * 0.22 + (S.gRoll || 0) * 0.15); // gesture roll: controlled, partial camera follow
   // shake
   const kmh = S.speed * 3.6;
   const low = clamp(1 - S.agl / 40, 0, 1);
@@ -2293,6 +2296,7 @@ const portalMat = new THREE.ShaderMaterial({
 });
 const portal = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), portalMat); portal.visible = false; portal.frustumCulled = false; portal.renderOrder = 15; scene.add(portal);
 function blastGo() {
+  if (S.car) { if (S.car.dir > 0) xform(); S.blastAfter = true; pop('TRANSFORMING TO FLIGHT FOR BLAST', 'banked'); return; }
   if (S.mode !== 'playing' || RX.blast || S.land) return;
   if (RX.blastCool > 0) { pop('BLAST RECHARGING ' + Math.ceil(RX.blastCool) + ' s', 'close'); return; }
   endRide(); RX.blast = { t: 0, portal: null, passed: false };
@@ -2602,7 +2606,7 @@ function rxReset() {
   for (const s of shotPool) { s.on = false; s.s.visible = false; }
   RX.rocks.length = 0; RX.geysers.length = 0; RX.frozen.length = 0; RX.nextRock = 0; RX.nextGey = 0; RX.wave = null; waveMesh.visible = false;
   RX.blast = null; RX.blastCool = 0; portal.visible = false; endRide(); S.land = null; RX.freezeCool = 0; RX.g = 1; RX.gMax = 1; RX.blk = 0; RX.red = 0; RX.ph = S.heading; RX.pvy = 0;
-  RX.gsupCool = 0; S.gsIntercepts = 0; RX.freezeAmmo = params.has('freezeammo') ? 6 : 0; S.jetKills = 0; S.misHits = 0; S.engineFail = false; S.fallV = 0; S.boom100 = false; S.machStep = 0; S.boomZone = null;
+  RX.gsupCool = 0; S.gsIntercepts = 0; if (S.car) { S.car = null; if (carRig) carRig.g.visible = false; ship.userData.body.scale.set(1, 1, 1); ship.userData.body.position.y = 0; } S.blastAfter = false; RX.freezeAmmo = params.has('freezeammo') ? 6 : 0; S.jetKills = 0; S.misHits = 0; S.engineFail = false; S.fallV = 0; S.boom100 = false; S.machStep = 0; S.boomZone = null;
   if (RX.ice && !params.has('ice')) { RX.ice = false; } if (params.has('ice')) RX.ice = true;
 }
 function rxClearDeckMeshes() { for (const zn of RX.zones) if (zn.mesh) { scene.remove(zn.mesh); zn.mesh.geometry.dispose(); zn.mesh = null; } }
@@ -2675,6 +2679,8 @@ function rxMenuSync() {
   set('mxSmart', RX.smart ? 'SMART AVOID · ON' : 'SMART AVOID · OFF', RX.smart);
   set('mxSound', RX.mute ? 'SOUND · OFF' : 'SOUND · ON', !RX.mute);
   set('mxCig', RX.cig ? 'CIGARETTE · ON' : 'CIGARETTE · OFF', RX.cig);
+  set('mxXform', S.car && S.car.dir > 0 ? '✈ TRANSFORM → FLIGHT' : '🚗 TRANSFORM → CAR', !!(S.car && S.car.dir > 0));
+  set('mxCarSup', RX.carSuper ? 'CAR SUPERSAFE · ON' : 'CAR SUPERSAFE · OFF', RX.carSuper);
   set('mxAuto', S.autopilot ? 'AUTOPILOT · ON' : 'AUTOPILOT · OFF', S.autopilot);
   set('mxSafe', safeMode ? 'SAFE · ON' : 'SAFE · OFF', safeMode);
   set('mxGsup', RX.gsupCool > 0 ? 'Gs SUPERMODE · ' + Math.ceil(RX.gsupCool) + ' s' : 'Gs SUPERMODE', false);
@@ -2792,7 +2798,7 @@ const RX_ACT = {
   mxSuper: () => { RX.super = !RX.super; pop(RX.super ? 'BLACKHAWK SUPERSAFE · CUTS THROUGH OBSTACLES' : 'SUPERSAFE OFF', 'unlock'); rxMenuSync(); },
   mxX: () => { RX.xsurv = !RX.xsurv; pop(RX.xsurv ? 'X SURVIVAL · WATER & ROCK IMPACTS ABSORBED' : 'X SURVIVAL OFF', 'unlock'); rxMenuSync(); },
   mxPhase: () => setPhase((RX.phase + 1) % 3), mxSmart: () => { RX.smart = !RX.smart; pop(RX.smart ? 'SMART ROCK AVOIDANCE ON' : 'SMART ROCK AVOIDANCE OFF', 'banked'); rxMenuSync(); },
-  mxGsup: () => gsSupermode(), mxG3far: () => { RX.g3far = !RX.g3far; rxMenuSync(); }, mxHelp: () => { RX.g47h = !RX.g47h; rxMenuSync(); },
+  mxGsup: () => gsSupermode(), mxXform: () => xform(), mxCarSup: () => { RX.carSuper = !RX.carSuper; pop(RX.carSuper ? 'CAR SUPERSAFE · DESTROYS OBSTACLES IN PATH' : 'CAR SUPERSAFE OFF', 'unlock'); rxMenuSync(); }, mxG3far: () => { RX.g3far = !RX.g3far; rxMenuSync(); }, mxHelp: () => { RX.g47h = !RX.g47h; rxMenuSync(); },
   mxG3req: () => { if (!RX.drone) setDrone(true); if (RX.strikeCool > 0) pop('G3 STRIKE RECHARGING ' + Math.ceil(RX.strikeCool) + ' s', 'close'); else strikeCard(true); },
   mxSmartM: () => { RX.smartM = !RX.smartM; rxMenuSync(); },
   mxCchase: () => setCam('chase'), mxCcock: () => setCam('cockpit'), mxCg3: () => setCam('g3'), mxCg47: () => setCam('g47'),
@@ -2811,7 +2817,7 @@ $('rxScrim').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stop
 $('voiceChip').addEventListener('click', (e) => { e.stopPropagation(); setVoice(!RX.voice); });
 addEventListener('keydown', (e) => {
   if (e.repeat || S.mode !== 'playing') return;
-  const k = { KeyG: 'mxWing', KeyQ: 'mxWave', KeyC: 'mxCam', KeyV: 'mxWar', KeyU: 'mxUltra', KeyB: 'mxBlast', KeyL: 'mxLand', KeyP: 'mxGhost', KeyI: 'mxScan', KeyO: 'mxVoice', KeyK: 'mxCarrier', KeyJ: 'mxDrone', KeyN: 'mxPip', KeyH: 'mxSwipe', KeyY: 'rxCardYes', KeyM: null }[e.code];
+  const k = { KeyG: 'mxWing', KeyQ: 'mxWave', KeyC: 'mxCam', KeyV: 'mxWar', KeyU: 'mxUltra', KeyB: 'mxBlast', KeyL: 'mxLand', KeyP: 'mxGhost', KeyI: 'mxScan', KeyO: 'mxVoice', KeyK: 'mxCarrier', KeyJ: 'mxDrone', KeyN: 'mxPip', KeyH: 'mxSwipe', KeyY: 'rxCardYes', KeyT: 'mxXform', KeyM: null }[e.code];
   if (e.code === 'KeyM') rxMenu(); else if (e.code === 'Escape') { if (RX.ride) endRide(); else rxMenu(false); } else if (k) RX_ACT[k]();
 });
 rxMenuSync();
@@ -2846,6 +2852,7 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h; camera.updateProjectionMatrix();
   document.body.classList.toggle('portrait', h > w);
+  controls.hudTop = (document.getElementById('tc').getBoundingClientRect().bottom || 96) + 4;
 }
 addEventListener('resize', resize);
 resize();
@@ -3011,6 +3018,106 @@ function setVoiceCtl(on) {
 $('mxVc').addEventListener('click', () => setVoiceCtl(!VC.on));
 window.__game.ui = { setUiOff, setVoiceCtl, megaBoom };
 
+
+// ---------- v34: TRANSFORM · Blackhawk <-> armored ground vehicle ----------
+let carRig = null;
+function buildCarRig() {
+  const g = new THREE.Group(); ship.add(g);
+  const armor = new THREE.MeshStandardMaterial({ color: 0x0d0e10, metalness: 0.7, roughness: 0.38, envMap: hdrEnv, envMapIntensity: 0.15 });
+  const tyre = new THREE.MeshStandardMaterial({ color: 0x080808, roughness: 0.9 }), rim = new THREE.MeshStandardMaterial({ color: 0x3a3d42, metalness: 0.9, roughness: 0.3 });
+  const lamp = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 0.25, 0.1), toneMapped: false });
+  const panels = [];
+  for (const s of [-1, 1]) { // armor side skirts slide down and out
+    const p = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.9, 6.5), armor); p.userData = { from: new THREE.Vector3(s * 1.1, 0.2, 0.4), to: new THREE.Vector3(s * 2.0, -0.55, 0.4) }; g.add(p); panels.push(p);
+  }
+  const nose = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.45, 2.2), armor); nose.userData = { from: new THREE.Vector3(0, 0.1, -2.5), to: new THREE.Vector3(0, -0.5, -3.6) }; nose.rotation.x = 0.18; g.add(nose); panels.push(nose);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.3, 0.6), lamp); tail.userData = { from: new THREE.Vector3(0, 0.3, 3.2), to: new THREE.Vector3(0, -0.15, 3.6) }; g.add(tail); panels.push(tail);
+  const wheels = [];
+  for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const pivot = new THREE.Group(); pivot.userData = { x: x * 2.05, z: z * 2.5, front: z < 0 }; g.add(pivot);
+    const w = new THREE.Group(); pivot.add(w);
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 0.7, 24).rotateZ(Math.PI / 2), tyre); w.add(t);
+    const r = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.72, 10).rotateZ(Math.PI / 2), rim); w.add(r);
+    wheels.push({ pivot, w });
+  }
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  g.scale.setScalar(1.6); g.visible = false;
+  return { g, panels, wheels, spin: 0 };
+}
+function xform() {
+  if (S.mode !== 'playing' || RX.blast) return;
+  if (!carRig) carRig = buildCarRig();
+  if (!S.car) S.car = { k: 0, dir: 1, susp: 0, suspV: 0, steer: 0 };
+  else S.car.dir = -S.car.dir;
+  audio.whoosh(); pop(S.car.dir > 0 ? 'TRANSFORM · GROUND VEHICLE' : 'TRANSFORM · FLIGHT', 'unlock'); rxSay(S.car.dir > 0 ? 'Ground mode.' : 'Flight mode.', 'xf'); rxMenuSync();
+}
+const sm01 = (x) => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+function carAnim(dt) {
+  const C = S.car; if (!C || !carRig) return;
+  C.k = clamp(C.k + C.dir * dt / 1.4, 0, 1);
+  const k = C.k, body = ship.userData.body;
+  // wings fold in, airframe lowers & narrows, thrusters swing to rear exhaust; panels slide; wheels deploy then suspension settles
+  body.scale.set(1 - 0.55 * sm01(k * 1.6), 1 - 0.25 * sm01(k), 1 - 0.1 * sm01(k)); body.position.y = -0.2 * sm01(k);
+  carRig.g.visible = k > 0.02;
+  for (const p of carRig.panels) { p.position.lerpVectors(p.userData.from, p.userData.to, sm01((k - 0.15) / 0.6)); p.scale.setScalar(Math.max(0.01, sm01(k / 0.3))); }
+  const wk = sm01((k - 0.35) / 0.5);
+  for (const w of carRig.wheels) {
+    const u = w.pivot.userData; w.pivot.position.set(u.x * (0.4 + 0.6 * wk), -0.2 - 0.9 * wk + (k >= 1 ? -C.susp : 0), u.z);
+    w.w.scale.setScalar(Math.max(0.01, wk)); w.pivot.rotation.y = u.front ? -C.steer * 0.5 : 0; w.w.rotation.x = carRig.spin;
+  }
+  if (C.k <= 0 && C.dir < 0) { // back to flight
+    carRig.g.visible = false; body.scale.set(1, 1, 1); body.position.y = 0; S.car = null; rxMenuSync();
+    if (S.blastAfter) { S.blastAfter = false; blastGo(); }
+  }
+}
+function carFlight(dt) { // returns true when the vehicle model owns the motion
+  const C = S.car; carAnim(dt);
+  if (!S.car) return false;
+  const g = world.surface(S.pos.x, S.pos.z), water = world.gridHeight(S.pos.x, S.pos.z) < 0 && !RX.above, floor = water && RX.xsurv ? Math.max(g, 0) : g;
+  if (C.k < 1 && C.dir > 0) { // descend to the ground while transforming, bleeding speed to vehicle range
+    S.pos.y = damp(S.pos.y, floor + 1.35, 3 + 6 * C.k, dt); S.speed = damp(S.speed, Math.min(S.speed, 700 / 3.6), 1.5, dt);
+    headingFrame(S.heading); S.pos.addScaledVector(_rf, S.speed * dt); S.pitch = damp(S.pitch, 0, 5, dt);
+  } else if (C.dir < 0) { // lift-off
+    S.pos.y += (6 + 20 * (1 - C.k)) * dt; headingFrame(S.heading); S.pos.addScaledVector(_rf, S.speed * dt);
+  } else {
+    // ground handling: throttle 0..900 km/h, bicycle steering, sprung suspension, grip-limited yaw
+    let st = controls.steer; if (S.autopilot || S.mode === 'attract') { const a = autopilotInput(dt); st = a.steer; }
+    const target = (40 + Math.pow(controls.throttle, 1.5) * 860) / 3.6;
+    S.speed += clamp(target - S.speed, -60 * dt, 25 * dt);
+    C.steer = damp(C.steer, st, 8, dt);
+    const yaw = C.steer * Math.min(1.6, 9 / Math.max(S.speed, 5)) * Math.min(S.speed / 8, 1);
+    S.heading -= yaw * dt * 2.2; if (Math.abs(S.heading) > 1.15) S.heading = Math.sign(S.heading) * 1.15;
+    headingFrame(S.heading); S.prevPos.copy(S.pos); S.pos.addScaledVector(_rf, S.speed * dt);
+    const g2 = world.surface(S.pos.x, S.pos.z), w2 = world.gridHeight(S.pos.x, S.pos.z) < 0 && !RX.above, f2 = w2 && RX.xsurv ? Math.max(g2, 0) : g2;
+    C.wall = f2 - (S.pos.y - 1.35) > 6; // step too high to climb = wall impact
+    C.drown = w2 && !RX.xsurv;
+    const ahead = world.surface(S.pos.x + _rf.x * 3, S.pos.z + _rf.z * 3);
+    S.pitch = damp(S.pitch, Math.atan2(ahead - f2, 3), 10, dt);
+    C.suspV += (-(C.susp) * 120 - C.suspV * 14) * dt + (f2 + 1.35 - S.pos.y) * 0.5; C.susp += C.suspV * dt; C.susp = clamp(C.susp, -0.35, 0.35);
+    S.pos.y = Math.max(f2 + 1.35, S.pos.y - 9.81 * dt * 2); if (S.pos.y < f2 + 1.4) S.pos.y = f2 + 1.35;
+    carRig.spin -= S.speed * dt / 0.75;
+    if (S.speed > 15 && Math.random() < 0.9) dust.spawn(S.pos.x - _rf.x * 3, f2 + 0.5, S.pos.z - _rf.z * 3, (Math.random() - 0.5) * 4, 1 + Math.random() * 2, (Math.random() - 0.5) * 4, 1.2, 1.5, 6, 0.5, ...(w2 ? [1.4, 1.5, 1.6] : E.dust), 1, 0.4);
+    S.roll = damp(S.roll, -C.steer * 0.08, 6, dt);
+  }
+  S.agl = S.pos.y - world.surface(S.pos.x, S.pos.z);
+  ship.position.copy(S.pos); ship.rotation.set(S.pitch, S.heading, S.roll);
+  S.dist = Math.max(S.dist, -S.pos.z);
+  if (S.mode === 'playing') { S.time += dt; S.topKmh = Math.max(S.topKmh, S.speed * 3.6); }
+  return true;
+}
+function carCollide() {
+  const C = S.car;
+  for (const o of nearObs) {
+    if (o.dead || (RX.ice && (o.type === 'tree' || o.type === 'jtree')) || (o.type === 'boulder' && o.r < 1.2)) continue;
+    const dx = o.x - S.pos.x, dz = o.z - S.pos.z, R = targetRadius(o) + 2.2; if (dx * dx + dz * dz > R * R) continue;
+    if (RX.carSuper || RX.super) { _v.set(o.x, S.pos.y, o.z); destroyTarget(o, _v); S.superCuts = (S.superCuts || 0) + 1; continue; } // CAR SUPERSAFE: plough through
+    if (RX.ghost) continue;
+    S.crashCause = 'VEHICLE IMPACT'; return true;
+  }
+  if (C.wall && !RX.ghost) { if (RX.carSuper || RX.super) { S.pos.y += 4; C.wall = false; } else { S.crashCause = 'HIT A WALL'; return true; } }
+  if (C.drown && !RX.ghost) { S.crashCause = 'DROVE INTO WATER'; return true; }
+  return false;
+}
 // ---------- v33: cameras + 3D cockpit ----------
 function addNav(m) { // subtle nav lights on G47: red/green steady wingtips + white strobe
   m.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(m), sx = (bb.max.x - bb.min.x) / 2 / m.scale.x;
@@ -3120,7 +3227,7 @@ function aiAnalysis() {
       if (cx * cx + cz * cz < (targetRadius(o) + 8) ** 2 && cy < (o.y || world.surface(o.x, o.z)) + (o.h || o.r * 2) + 6) { tti = t; what = (TARGET_NAME[o.type] || 'OBSTACLE') + ' COLLISION'; }
     }
   }
-  for (let k = 1; k <= 40; k++) { const t = k * H / 40; if (t >= tti) break; const x = S.pos.x + vx * t, z = S.pos.z + vz * t; if (S.pos.y + vy * t < world.surface(x, z) + 3) { tti = t; what = 'TERRAIN COLLISION'; break; } }
+  for (let k = 1; k <= 40 && !S.car; k++) { const t = k * H / 40; if (t >= tti) break; const x = S.pos.x + vx * t, z = S.pos.z + vz * t; if (S.pos.y + vy * t < world.surface(x, z) + 3) { tti = t; what = 'TERRAIN COLLISION'; break; } }
   for (const e of RX.enemies) { if (e.dead) continue; const rx = e.p.x - S.pos.x, ry = e.p.y - S.pos.y, rz = e.p.z - S.pos.z, wx = e.v.x - vx, wy = e.v.y - vy, wz = e.v.z - vz, w2 = wx * wx + wy * wy + wz * wz; if (w2 < 1) continue; const t = -(rx * wx + ry * wy + rz * wz) / w2; if (t <= 0 || t > H || t >= tti) continue; const d = Math.hypot(rx + wx * t, ry + wy * t, rz + wz * t); if (d < 40) { tti = t; what = 'HOSTILE CLOSING'; } }
   for (const s of shotPool) { if (!s.on) continue; const rx = s.p.x - S.pos.x, ry = s.p.y - S.pos.y, rz = s.p.z - S.pos.z, wx = s.v.x - vx, wy = s.v.y - vy, wz = s.v.z - vz, w2 = wx * wx + wy * wy + wz * wz; const t = w2 > 1 ? -(rx * wx + ry * wy + rz * wz) / w2 : -1; if (t > 0 && t < tti && Math.hypot(rx + wx * t, ry + wy * t, rz + wz * t) < 25) { tti = t; what = 'MISSILE INBOUND'; } }
   const box = $('aiBox'); box.classList.remove('hidden');
@@ -3132,7 +3239,7 @@ function aiAnalysis() {
   box.className = 'bad'; box.textContent = what + ' ' + tti.toFixed(1) + 's · ESCAPE ' + best;
   return '<b class="bad">AI · ' + what + ' ' + tti.toFixed(1) + 's · ' + best + '</b>';
 }
-window.__game.v33 = { setCam, gsSupermode, setPhase, aiAnalysis, get cockpit() { return cockpit; }, get wingmen() { return wingmen; }, get carrier() { return carrier; }, get drone() { return drone; }, shotPool, misPool, DESTROYED };
+window.__game.v33 = { xform, get carRig() { return carRig; }, setCam, gsSupermode, setPhase, aiAnalysis, get cockpit() { return cockpit; }, get wingmen() { return wingmen; }, get carrier() { return carrier; }, get drone() { return drone; }, shotPool, misPool, DESTROYED };
 window.__game.ready = true;
 if (TEST) {
   S.noCollide = !params.has('collide');
