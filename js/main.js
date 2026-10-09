@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=38';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=38';
-import { loadAssets } from './assets.js?v=38';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=39';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=39';
+import { loadAssets } from './assets.js?v=39';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=38';
-import { GpuDust } from './gpudust.js?v=38';
-import { PostFX } from './postfx.js?v=38';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=38';
-import { GameAudio } from './audio.js?v=38';
-import { Controls } from './input.js?v=38';
+import { Grass } from './grass.js?v=39';
+import { GpuDust } from './gpudust.js?v=39';
+import { PostFX } from './postfx.js?v=39';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=39';
+import { GameAudio } from './audio.js?v=39';
+import { Controls } from './input.js?v=39';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -318,9 +318,9 @@ function updateBiomeEnv(dt) {
 
 // ---------- waterfalls ----------
 const fallsMat = new THREE.ShaderMaterial({
-  uniforms: { time: { value: 0 }, fogColor: fogU.fogColor, fogNear: fogU.fogNear, fogFar: fogU.fogFar },
+  uniforms: { time: { value: 0 }, iceK: { value: 0 }, fogColor: fogU.fogColor, fogNear: fogU.fogNear, fogFar: fogU.fogFar },
   vertexShader: `varying vec2 vUv; varying float vD; void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vD = -mv.z; gl_Position = projectionMatrix * mv; }`,
-  fragmentShader: `uniform float time; uniform vec3 fogColor; uniform float fogNear; uniform float fogFar; varying vec2 vUv; varying float vD;
+  fragmentShader: `uniform float time; uniform float iceK; uniform vec3 fogColor; uniform float fogNear; uniform float fogFar; varying vec2 vUv; varying float vD;
     float h(float n){ return fract(sin(n) * 43758.5453); }
     void main(){
       float col = floor(vUv.x * 40.0);
@@ -330,6 +330,7 @@ const fallsMat = new THREE.ShaderMaterial({
       float edge = smoothstep(0.0, 0.18, vUv.x) * smoothstep(1.0, 0.82, vUv.x);
       float a = edge * (0.45 + 0.5 * s) * (0.75 + 0.25 * vUv.y);
       vec3 c = mix(vec3(0.75, 0.85, 0.9), vec3(1.15), s);
+      if (iceK > 0.0) { float col2 = h(col + 11.0), st = smoothstep(0.2, 0.9, col2) * (0.6 + 0.4 * vUv.y); vec3 ic = mix(vec3(0.62, 0.78, 0.9), vec3(0.95, 0.98, 1.0), st); c = mix(c, ic, iceK); a = mix(a, edge * (0.85 + 0.15 * st), iceK); } // frozen icefall: static
       float f = smoothstep(fogNear, fogFar, vD);
       gl_FragColor = vec4(mix(c, fogColor, f), a);
       #include <tonemapping_fragment>
@@ -372,6 +373,7 @@ function addChunk(idx) {
   const { objs, falls } = genChunkContent(world, idx);
   rxDeckObjs(idx, objs); RX.noPatch = false;
   const dead = DESTROYED.get(idx); objs.forEach((o, i) => { o.uid = idx * 4096 + i; if (dead && dead.has(i)) o.dead = true; const cr = CHIPPED.get(o.uid); if (cr) o.r = cr; const B = S.boomZone; if (B && Math.hypot(o.x - B.x, o.z - B.z) < B.r) o.dead = true; const bf = baseFlatK(o.x, o.z); if (bf && bf[0] > 0.3) o.dead = true; }); // base pad is cleared of rocks
+  for (let i = falls.length - 1; i >= 0; i--) if (!params.has('falls') && makeRng(((S.seed || 1) ^ (idx * 0x2c1b3c6d)) >>> 0)() >= 0.02) falls.splice(i, 1); // rare: ~2% of eligible cliffs
   for (const f of falls) f.mesh = makeFalls(f);
   chunks.set(idx, { idx, mesh, objs, falls });
 }
@@ -2546,18 +2548,20 @@ function updateHazards(dt) {
   // geysers in volcanic / fjord / gorge / meadow country
   if (!RX.nextGey) RX.nextGey = d + (params.has('geyser') ? 500 : 1500);
   if (d > RX.nextGey) {
-    RX.nextGey = d + (params.has('geyser') ? 900 : 1800 + Math.random() * 2200);
+    RX.nextGey = d + (params.has('geyser') ? 900 : 1000);
+    const zi = Math.floor((d + 3000) / 1000); if (!params.has('geyser') && makeRng(((S.seed || 1) ^ (zi * 0x7f4a7c15)) >>> 0)() >= 0.03) { /* ~3% of zones */ } else {
     const zd = d + clamp(S.speed * 3, 1200, (AHEAD - 2) * CHUNK_L), z = -zd;
     if ((GEY_BIOMES[world.biomeMain(z)] || params.has('geyser')) && world.gridHeight0(world.pathX(z), z) > -0.5) {
       const x = world.pathX(z) + (Math.random() - 0.5) * 70;
-      RX.geysers.push({ x, z, yg: world.gridHeight0(x, z), ph: Math.random() * 3, top: 230, k: 0 });
+      RX.geysers.push({ x, z, yg: world.gridHeight0(x, z), ph: Math.random() * 3, top: 160 + Math.random() * 140, k: 0, per: 3 + Math.random() * 5, dur: 1.5 + Math.random() * 2.5 });
+    }
     }
   }
   RX.inGeyser = 0;
   for (let i = RX.geysers.length - 1; i >= 0; i--) {
     const g = RX.geysers[i];
     if (g.z > S.pos.z + 400) { RX.geysers.splice(i, 1); continue; }
-    g.ph += dt; const c = g.ph % 6; g.k = c < 3.8 ? sm(0, 0.6, c) * sm(3.8, 3.0, c) : 0;
+    g.ph += dt; if (g.ph > g.per + g.dur) { g.ph = 0; g.per = 2 + Math.random() * 7; g.dur = 1.2 + Math.random() * 3; } const c = g.ph - g.per; g.k = c > 0 ? sm(0, 0.5, c) * sm(g.dur, g.dur - 0.7, c) * (0.8 + 0.2 * Math.sin(S.t * 13 + g.x)) : 0; // irregular eruptions
     const near = Math.abs(g.z - S.pos.z) < 2500;
     if (near && g.k > 0.05) { // steam column
       g.acc = (g.acc || 0) + dt * 70 * g.k * quality.particles;
@@ -2671,7 +2675,7 @@ function rxUpdate(dt, rdt) { // dt = game (possibly slow-mo) time, rdt = real ti
   RX.jolt = RX.joltT > 0 ? RX.joltDir * 0.6 * Math.min(RX.joltT / 0.7, 1) * (S.autopilot || rxForceAP() ? 0.2 : 1) + Math.sin(S.t * 60) * 0.15 * RX.joltT : 0;
   RX.gsupCool = Math.max(0, RX.gsupCool - dt);
   if (RX.fzBonus > 0) { RX.fzBonus = Math.max(0, RX.fzBonus - rdt); const el = $('fzBonus'); el.classList.toggle('hidden', !(RX.fzBonus > 0)); el.textContent = '❄ FREEZE BONUS ' + RX.fzBonus.toFixed(1) + ' s'; } // real time: slow-mo does not extend it
-  updateBase(); updateBirdsFossils(dt);
+  updateBase(); updateBirdsFossils(dt); updatePebbles(); grass.U.tallK.value = damp(grass.U.tallK.value, RX.iceK > 0.5 ? 0 : tallGrassK(S.dist), 2, dt);
   updateHazards(dt); updateWingmen(dt); updateEscorts(dt); updateFreeze(dt); updateBlast(dt); updateHostiles(dt); updateG(dt);
   if (RX.instDirty) { RX.instDirty = false; rebuildInstances(); }
   RX.hudT -= rdt;
@@ -3035,7 +3039,7 @@ function tick(dt, draw) {
   _sunV.copy(SUN).transformDirection(camera.matrixWorldInverse);
   for (const m of ship.userData.hullMats) if (m.userData.sh) m.userData.sh.uniforms.sunDirV.value.copy(_sunV);
   skyMat.uniforms.time.value = S.t;
-  fallsMat.uniforms.time.value = S.t;
+  fallsMat.uniforms.time.value = S.t * (1 - RX.iceK); fallsMat.uniforms.iceK.value = RX.iceK;
   { // engine load: throttle + boost + blizzard strain; HUD gauge + audio
     const tgt = clamp(0.22 + 0.5 * thr + 0.15 * (S.boostFx || 0) + 0.45 * (S.snowK || 0) + 0.12 * (S.frost || 0), 0, 1);
     S.engLoad = damp(S.engLoad || 0, tgt, tgt > (S.engLoad || 0) ? 0.9 : 0.5, dt);
@@ -3208,6 +3212,31 @@ function updateBirdsFossils(dt) {
     }
   }
   fossils.instanceMatrix.needsUpdate = true;
+}
+
+// ---------- v39: tall jungle grass stretches + dense instanced pebbles ----------
+function tallGrassK(d) { // 5 km checkpoints, 70% chance, stretches 2-10 km
+  let k = 0; for (let cp = Math.floor(d / 5000) - 2; cp <= Math.floor(d / 5000); cp++) { if (cp < 0) continue; const r = makeRng(((S.seed || 1) ^ (cp * 0x3243f6a9)) >>> 0); if (r() >= 0.7) continue; const st = cp * 5000, en = st + 2000 + r() * 8000; if (d > st && d < en) k = Math.max(k, Math.min(1, (d - st) / 300, (en - d) / 300)); }
+  return k;
+}
+const PEB_N = 120, PEB_SP = 1.6;
+const pebbles = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.16, 0), new THREE.MeshStandardMaterial({ color: 0x8a8279, roughness: 0.9, flatShading: true }), PEB_N * PEB_N);
+pebbles.frustumCulled = false; pebbles.receiveShadow = true; pebbles.count = PEB_N * PEB_N; scene.add(pebbles);
+const pebCell = new Int32Array(PEB_N * PEB_N * 2).fill(-2147483647); { const hide = new THREE.Matrix4().makeScale(0, 0, 0); for (let i = 0; i < PEB_N * PEB_N; i++) pebbles.setMatrixAt(i, hide); }
+function updatePebbles() {
+  const on = S.agl < 80 && S.speed * 3.6 < 4000 && !RX.blast && S.mode !== 'attract' && !RX.above;
+  pebbles.visible = on; if (!on) return;
+  const ax = Math.floor(camera.position.x / PEB_SP) - PEB_N / 2, az = Math.floor(camera.position.z / PEB_SP) - PEB_N / 2;
+  let budget = 3500, dirty = false;
+  for (let j = 0; j < PEB_N; j++) { const cz = az + j, mj = ((cz % PEB_N) + PEB_N) % PEB_N;
+    for (let i = 0; i < PEB_N; i++) { const cx = ax + i, mi = ((cx % PEB_N) + PEB_N) % PEB_N, id = mj * PEB_N + mi;
+      if (pebCell[id * 2] === cx && pebCell[id * 2 + 1] === cz) continue; if (budget-- <= 0) break;
+      pebCell[id * 2] = cx; pebCell[id * 2 + 1] = cz;
+      const h1 = Math.sin(cx * 127.1 + cz * 311.7) * 43758.5453 % 1, h2 = Math.sin(cx * 269.5 + cz * 183.3) * 43758.5453 % 1, x = (cx + Math.abs(h1)) * PEB_SP, z = (cz + Math.abs(h2)) * PEB_SP, y = world.surface(x, z);
+      const sc = (0.5 + Math.abs(h1 * 3 % 1) * 1.6) * (world.gridHeight(x, z) < 0.2 ? 0 : 1);
+      _bp.set(x, y + 0.03, z); _be.set(h1 * 6, h2 * 6, 0); _bq.setFromEuler(_be); _bs.set(sc * 1.3, sc * 0.6, sc); _bm.compose(_bp, _bq, _bs); pebbles.setMatrixAt(id, _bm); dirty = true; }
+    if (budget <= 0) break; }
+  if (dirty) pebbles.instanceMatrix.needsUpdate = true;
 }
 // ---------- v34: TRANSFORM · Blackhawk <-> armored ground vehicle ----------
 let carRig = null;

@@ -35,12 +35,23 @@ export class World {
     const segs = []; let d = 0, last = firstBiome || 'desert';
     let len = firstBiome ? 12000 : 10000 + r() * 8000;
     segs.push({ start: 0, end: len, type: last }); d = len;
-    const others = ['desert', 'coast', 'fjord', 'volcanic', 'gorge', 'grass', 'grass', 'jungle', 'jungle'];
+    const others = ['desert', 'fjord', 'volcanic', 'gorge', 'grass', 'grass', 'jungle', 'jungle'];
+    // fixed cadences: one ~140 km sea per 1,000 km (with gradual coasts + islands); 300 km checkpoints -> 19% chance of a 250 km snowy mountain region
+    const seas = [], mtns = [];
+    for (let k = 0; k * 1e6 < 4e6; k++) { const st = k * 1e6 + 60000 + r() * 780000; seas.push([st, st + 140000]); }
+    for (let cp = 300000; cp < 4e6; cp += 300000) if (r() < 0.19) { const st = cp, en = st + 250000; if (!seas.some(([a, b]) => st < b + 15000 && en > a - 15000) && !mtns.some(([a, b]) => st < b)) mtns.push([st, en]); }
+    if (typeof location !== 'undefined' && /[?&]mtntest/.test(location.search)) { mtns.unshift([0, 250000]); segs[0].type = 'fjord'; segs[0].mtn = true; }
+    this.mtns = mtns; this.seas = seas;
+    const inR = (L, x) => L.find(([a, b]) => x >= a && x < b);
     while (d < 4e6) {
-      let t;
-      if (last !== 'ocean' && r() < 0.3) t = 'ocean';
-      else { do { t = others[(r() * others.length) | 0]; } while (t === last); }
-      len = 10000 + r() * 20000;
+      const sea = seas.find(([a]) => a - 14000 >= d && a - 14000 < d + 32000), mt = inR(mtns, d);
+      if (sea && d < sea[0] - 14000 + 1) { // coast run-in, open sea, coast run-out
+        if (sea[0] - 14000 > d) { segs.push({ start: d, end: sea[0] - 14000, type: last === 'desert' ? 'grass' : 'desert' }); d = sea[0] - 14000; }
+        segs.push({ start: d, end: sea[0], type: 'coast' }); segs.push({ start: sea[0], end: sea[1], type: 'ocean' }); segs.push({ start: sea[1], end: sea[1] + 14000, type: 'coast' }); d = sea[1] + 14000; last = 'coast'; continue;
+      }
+      if (mt) { segs.push({ start: d, end: mt[1], type: 'fjord', mtn: true }); d = mt[1]; last = 'fjord'; continue; }
+      let t; do { t = others[(r() * others.length) | 0]; } while (t === last);
+      len = 10000 + r() * 20000; const nm = mtns.find(([a]) => a > d && a < d + len); if (nm) len = nm[0] - d;
       segs.push({ start: d, end: d + len, type: t }); d += len; last = t;
     }
     this.segs = segs;
@@ -61,6 +72,7 @@ export class World {
     else { B.a = sg.type; B.b = sg.type; B.t = 0; }
     return B;
   }
+  mtnAt(z) { const d = -z; if (!this.mtns) return 0; for (const [a, b] of this.mtns) if (d > a - 3000 && d < b + 3000) return Math.min(1, (d - a + 3000) / 3000, (b + 3000 - d) / 3000); return 0; }
   biomeMain(z) { const B = this.biomeAt(z); return B.t > 0.5 ? B.b : B.a; }
 
   height(x, z) {
@@ -75,7 +87,7 @@ export class World {
     switch (type) {
       case 'desert': return this.canyonH(x, z) + 12;
       case 'volcanic': return this.canyonH(x, z) * 0.95 + 12 + (this.noise(x * 0.012, z * 0.012) - 0.5) * 18;
-      case 'fjord': return this.canyonH(x, z) * 1.2 - 24;
+      case 'fjord': if (this.mtnAt(z)) { const rid = 1 - Math.abs(this.noise(x * 0.0035, z * 0.0035) * 2 - 1); return this.canyonH(x, z) * 1.45 + 10 + rid * rid * 90 * Math.min(1, Math.abs(x - this.pathX(z)) / 400); } return this.canyonH(x, z) * 1.2 - 24; // snowy mountain region
       case 'ocean': return this.oceanH(x, z);
       case 'coast': return this.coastH(x, z);
       case 'gorge': return this.gorgeH(x, z);
@@ -89,6 +101,7 @@ export class World {
     const cx = this.pathX(z), d = Math.abs(x - cx);
     const n = this.fbm(x * 0.004, z * 0.004, 3);
     let h = -40 + n * 18;
+    if (d > 260) { const isl = this.fbm(x * 0.0016 + 3.3, z * 0.0016 - 1.7, 3); if (isl > 0.6) h += Math.min(1, (isl - 0.6) / 0.08) * (52 + 30 * this.noise(x * 0.01, z * 0.01)); } // scattered islands off the flight line
     const e = d - 1000 + (n - 0.5) * 360;
     if (e > 0) { let t = Math.min(e / 260, 1); t = t * t * (3 - 2 * t); h += t * (200 + 140 * this.noise(x * 0.002, z * 0.002)) + (this.noise(x * 0.02, z * 0.02) - 0.5) * 20 * t; }
     return h;
@@ -333,6 +346,7 @@ export function buildChunkGeometry(world, idx) {
       const B = world.biomeAt(zw);
       if (B.t <= 0 || B.a === B.b) biomeColor(B.a, _cc, h, slope, n, band, band2);
       else { const t = B.t, bA = B.a, bB = B.b; biomeColor(bA, _cc, h, slope, n, band, band2); const r0 = _cc[0], g0 = _cc[1], b0 = _cc[2]; biomeColor(bB, _cc, h, slope, n, band, band2); _cc[0] = r0 + (_cc[0] - r0) * t; _cc[1] = g0 + (_cc[1] - g0) * t; _cc[2] = b0 + (_cc[2] - b0) * t; }
+      const mk = world.mtnAt(zw); if (mk > 0) { const sn = mk * Math.min(1, Math.max(0, (h - 25) / 50 + n * 0.4) * Math.max(0, 1 - slope * 1.6)); _cc[0] += (0.9 - _cc[0]) * sn; _cc[1] += (0.93 - _cc[1]) * sn; _cc[2] += (0.97 - _cc[2]) * sn; } // snow caps
       col[v * 3] = _cc[0]; col[v * 3 + 1] = _cc[1]; col[v * 3 + 2] = _cc[2];
     }
   }

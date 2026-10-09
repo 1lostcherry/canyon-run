@@ -30,7 +30,7 @@ function tuftGeo(blades, segs, w, seed) {
 
 const VS = /* glsl */`
 precision highp float;
-uniform sampler2D hMap; uniform vec2 anchor; uniform float spacing; uniform float rIn; uniform float rOut; uniform float hScale;
+uniform sampler2D hMap; uniform vec2 anchor; uniform float spacing; uniform float rIn; uniform float rOut; uniform float hScale; uniform float tallK;
 uniform float time; uniform vec3 shipP; uniform float wash; uniform float washR; uniform float spd; uniform float lowK; uniform vec4 trail[${TRAIL}];
 attribute float aT; attribute float aSide; attribute vec2 aCell;
 varying float vT; varying float vSheen; varying float vVar; varying vec3 vW; varying float vDry;
@@ -49,7 +49,7 @@ void main(){
   float slope = abs(b.r - a.r) + abs(c.r - a.r);
   float dens = hv.g * smoothstep(9.0, 4.0, slope) * smoothstep(rOut, rOut * 0.82, d) * smoothstep(rIn * 0.8, rIn, d);
   float keep = step(h3, dens * 1.15);
-  float H = hScale * (0.55 + 0.9 * h3) * keep * smoothstep(0.0, 0.35, dens);
+  float H = hScale * (0.55 + 0.9 * h3) * keep * smoothstep(0.0, 0.35, dens) * (1.0 + tallK * 0.55); // tall jungle-grass stretches (~2 m)
   if (H < 0.01) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   // per-tuft yaw
   float yaw = h1 * 6.2832; float cy = cos(yaw), sy = sin(yaw);
@@ -123,7 +123,7 @@ export class Grass {
     this.trailT = 0; this.trailI = 0;
     this.U = {
       hMap: { value: this.tex }, time: { value: 0 }, shipP: { value: new THREE.Vector3() }, wash: { value: 0 }, washR: { value: 8 },
-      trail: { value: this.trail }, spd: { value: 0 }, lowK: { value: 0 }, ...shared,
+      trail: { value: this.trail }, spd: { value: 0 }, lowK: { value: 0 }, tallK: { value: 0 }, ...shared,
     };
     this.layers = [];
     this.group = new THREE.Group(); scene.add(this.group);
