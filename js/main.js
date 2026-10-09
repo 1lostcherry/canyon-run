@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=37';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=37';
-import { loadAssets } from './assets.js?v=37';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=38';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=38';
+import { loadAssets } from './assets.js?v=38';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=37';
-import { GpuDust } from './gpudust.js?v=37';
-import { PostFX } from './postfx.js?v=37';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=37';
-import { GameAudio } from './audio.js?v=37';
-import { Controls } from './input.js?v=37';
+import { Grass } from './grass.js?v=38';
+import { GpuDust } from './gpudust.js?v=38';
+import { PostFX } from './postfx.js?v=38';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=38';
+import { GameAudio } from './audio.js?v=38';
+import { Controls } from './input.js?v=38';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -371,7 +371,7 @@ function addChunk(idx) {
   scene.add(mesh);
   const { objs, falls } = genChunkContent(world, idx);
   rxDeckObjs(idx, objs); RX.noPatch = false;
-  const dead = DESTROYED.get(idx); objs.forEach((o, i) => { o.uid = idx * 4096 + i; if (dead && dead.has(i)) o.dead = true; const cr = CHIPPED.get(o.uid); if (cr) o.r = cr; const B = S.boomZone; if (B && Math.hypot(o.x - B.x, o.z - B.z) < B.r) o.dead = true; });
+  const dead = DESTROYED.get(idx); objs.forEach((o, i) => { o.uid = idx * 4096 + i; if (dead && dead.has(i)) o.dead = true; const cr = CHIPPED.get(o.uid); if (cr) o.r = cr; const B = S.boomZone; if (B && Math.hypot(o.x - B.x, o.z - B.z) < B.r) o.dead = true; const bf = baseFlatK(o.x, o.z); if (bf && bf[0] > 0.3) o.dead = true; }); // base pad is cleared of rocks
   for (const f of falls) f.mesh = makeFalls(f);
   chunks.set(idx, { idx, mesh, objs, falls });
 }
@@ -515,6 +515,7 @@ function resetRun(mode) {
   S.mode = mode;
   if (typeof resetMissiles === 'function' && misPool.length) resetMissiles();
   S.seed = params.has('seed') ? +params.get('seed') : daily && mode === 'playing' ? dailySeed() : (Math.random() * 1e9) | 0;
+  RX.air = rxGenAir(S.seed); // before any chunk is built: base pads level the terrain
   resetWorld(S.seed);
   S.pos.set(world.pathX(0), world.surface(world.pathX(0), 0) + (TEST && params.get('alt') ? +params.get('alt') + 2 : 30), 0);
   S.heading = 0; S.pitch = 0; S.roll = 0; S.steerS = 0;
@@ -1957,9 +1958,22 @@ const ICE_TINT = new THREE.Color(1.55, 1.65, 1.9);
 const spdNf = (sp) => Math.min(sp / (MAX_KMH / 3.6), 1);
 
 // ---------- 1) UPPER WORLD: sky-deck zones with escape holes ----------
+// military base pad: a levelled corridor along the whole 100 km so the base layout is never skipped
+const BASE_HALF = 420;
+function baseSide(A) { return (A.seed & 1) ? 1 : -1; }
+function baseLevel(z) { const zz = Math.floor(z / 2000) * 2000, u = (z - zz) / 2000, a = world.gridHeight0(world.pathX(zz), zz), b = world.gridHeight0(world.pathX(zz + 2000), zz + 2000), k = u * u * (3 - 2 * u); return Math.max(a + (b - a) * k, 2) + 1; }
+function baseCX(A, z) { return world.pathX(z) + baseSide(A) * 180; }
+function baseFlatK(x, z) {
+  const air = RX.air; if (!air || !air.length || !world || !world.gridHeight0) return null; const d = -z;
+  for (const A of air) { if (d < A.start - 1500 || d > A.end + 1500) continue;
+    const ends = Math.min((d - A.start + 1500) / 1500, (A.end + 1500 - d) / 1500, 1), off = Math.abs(x - baseCX(A, z));
+    if (off > BASE_HALF + 250) return null; const k = Math.min(1, (BASE_HALF + 250 - off) / 250) * ends; const kk = k * k * (3 - 2 * k);
+    return kk > 0 ? [kk, baseLevel(z)] : null; }
+  return null;
+}
 function rxPatchWorld(w) {
   const g0 = w.gridHeight.bind(w); w.gridHeight0 = g0;
-  w.gridHeight = (x, z) => { const h = g0(x, z); if (!(RX.inSim ? SIM.ab : RX.above) || RX.noPatch) return h; const r = roofAt(z); return r ? Math.max(h, r.t) : h; };
+  w.gridHeight = (x, z) => { let h = g0(x, z); const bf = baseFlatK(x, z); if (bf) h = h + (bf[1] - h) * bf[0]; if (!(RX.inSim ? SIM.ab : RX.above) || RX.noPatch) return h; const r = roofAt(z); return r ? Math.max(h, r.t) : h; };
 }
 function rxGenZones(seed) {
   const rnd = makeRng((seed ^ 0x2545f491) >>> 0), Z = [];
@@ -3083,33 +3097,42 @@ const BASE = (() => {
   const conc = new THREE.MeshStandardMaterial({ color: 0x8a867c, roughness: 0.9 }), lightM = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 1.7, 0.6), toneMapped: false }), dishM = new THREE.MeshStandardMaterial({ color: 0xd0d2d4, metalness: 0.3, roughness: 0.4, side: THREE.DoubleSide });
   return {
     tile: mk(new THREE.BoxGeometry(60, 0.4, 100), asphalt, 400), dash: mk(new THREE.BoxGeometry(1.4, 0.45, 18), paint, 400), edge: mk(new THREE.BoxGeometry(0.6, 0.6, 0.6), lightM, 900),
-    hangar: mk(new THREE.CylinderGeometry(18, 18, 46, 16, 1, false, 0, Math.PI).rotateZ(Math.PI / 2).rotateY(Math.PI / 2), metal, 60), hangarBase: mk(new THREE.BoxGeometry(36, 4, 46), conc, 60),
-    radarMast: mk(new THREE.CylinderGeometry(0.7, 1, 14, 8), metal, 40), radarDish: mk(new THREE.SphereGeometry(7, 16, 8, 0, Math.PI * 2, 0, Math.PI / 3), dishM, 40),
-    samBase: mk(new THREE.BoxGeometry(6, 2.2, 9), olive, 60), samTube: mk(new THREE.BoxGeometry(4.2, 1.6, 8).translate(0, 0, -1), olive, 60),
-    truck: mk(new THREE.BoxGeometry(3, 3, 9), olive, 80), tank: mk(new THREE.CylinderGeometry(1.3, 1.3, 6, 10).rotateX(Math.PI / 2), metal, 80),
-    jetBody: mk(new THREE.BoxGeometry(2.2, 1.8, 16), metal, 60), jetWing: mk(new THREE.BoxGeometry(12, 0.3, 4), metal, 60),
-    bldg: mk(new THREE.BoxGeometry(22, 9, 16), conc, 60), gen: mk(new THREE.BoxGeometry(5, 3, 4), olive, 60),
+    hangar: mk(new THREE.CylinderGeometry(18, 18, 46, 16, 1, false, 0, Math.PI).rotateZ(Math.PI / 2).rotateY(Math.PI / 2), metal, 160), hangarBase: mk(new THREE.BoxGeometry(36, 4, 46), conc, 160),
+    radarMast: mk(new THREE.CylinderGeometry(0.7, 1, 14, 8), metal, 80), radarDish: mk(new THREE.SphereGeometry(7, 16, 8, 0, Math.PI * 2, 0, Math.PI / 3), dishM, 80),
+    samBase: mk(new THREE.BoxGeometry(6, 2.2, 9), olive, 200), samTube: mk(new THREE.BoxGeometry(4.2, 1.6, 8).translate(0, 0, -1), olive, 200),
+    truck: mk(new THREE.BoxGeometry(3, 3, 9), olive, 300), tank: mk(new THREE.CylinderGeometry(1.3, 1.3, 6, 10).rotateX(Math.PI / 2), metal, 80),
+    jetBody: mk(new THREE.BoxGeometry(2.2, 1.8, 16), metal, 300), jetWing: mk(new THREE.BoxGeometry(12, 0.3, 4), metal, 300),
+    bldg: mk(new THREE.BoxGeometry(22, 9, 16), conc, 120), gen: mk(new THREE.BoxGeometry(5, 3, 4), olive, 120),
+    twy: mk(new THREE.BoxGeometry(24, 0.35, 100), new THREE.MeshStandardMaterial({ color: 0x2a2b2c, roughness: 0.95 }), 200), fence: mk(new THREE.BoxGeometry(0.3, 3, 500), new THREE.MeshStandardMaterial({ color: 0x7c8086, metalness: 0.6, roughness: 0.5, transparent: true, opacity: 0.55 }), 80),
+    pole: mk(new THREE.CylinderGeometry(0.2, 0.25, 12, 6), metal, 300), poleLamp: mk(new THREE.BoxGeometry(1.2, 0.4, 0.8), lightM, 300),
+    heliBody: mk(new THREE.CapsuleGeometry(1.5, 5, 4, 8).rotateX(Math.PI / 2), olive, 80), heliRotor: mk(new THREE.BoxGeometry(14, 0.12, 0.5), metal, 160),
     segs: new Map(),
   };
 })();
 const _bm = new THREE.Matrix4(), _bp = new THREE.Vector3(), _bq = new THREE.Quaternion(), _bs = new THREE.Vector3(1, 1, 1), _be = new THREE.Euler();
 function bPut(m, x, y, z, ry = 0, sx = 1, sy = 1, sz = 1, rx = 0) { if (m.count >= m.instanceMatrix.count) return; _bp.set(x, y, z); _be.set(rx, ry, 0); _bq.setFromEuler(_be); _bs.set(sx, sy, sz); _bm.compose(_bp, _bq, _bs); m.setMatrixAt(m.count++, _bm); }
-function baseSeg(A, k) { // deterministic layout for one 500 m segment of a base
+function baseSeg(A, k) { // deterministic, dense layout for one 500 m segment of the levelled base pad
   const key = A.start * 1000 + k; let sg = BASE.segs.get(key); if (sg) return sg;
-  const r = makeRng((A.seed ^ (k * 2246822519)) >>> 0), d0 = A.start + k * 500, side = (A.seed & 1) ? 1 : -1, items = [];
-  const zm = -(d0 + 250), cx = world.pathX(zm); // the route's valley line
-  const groundOK = (x, z) => Math.abs(world.surface(x, z) - world.surface(world.pathX(z), z)) < 14 && world.gridHeight(x, z) > 0.5;
-  for (let j = 0; j < 5; j++) { const z = -(d0 + j * 100 + 50), x = world.pathX(z) + side * 70; if (groundOK(x, z)) items.push(['rw', x, z]); }
-  const add = (type, p, off) => { if (r() < p) { const z = -(d0 + r() * 500), x = world.pathX(z) + side * (off[0] * 0.5 + r() * off[1]) * (r() < 0.25 ? -1 : 1); if (groundOK(x, z)) items.push([type, x, z, r() * 6.28]); } };
-  add('hangar', 0.5, [180, 80]); add('radar', 0.35, [170, 120]); add('sam', 0.5, [60, 60]); add('sam', 0.3, [200, 80]); add('truck', 0.6, [150, 40]); add('truck', 0.4, [70, 30]);
-  add('jet', 0.35, [150, 20]); add('bldg', 0.3, [230, 80]); add('gen', 0.4, [190, 40]); add('fuel', 0.3, [160, 60]);
+  const r = makeRng((A.seed ^ (k * 2246822519)) >>> 0), d0 = A.start + k * 500, sd = baseSide(A), items = [];
+  const at = (dz, off) => { const z = -(d0 + dz); return [baseCX(A, z) + sd * off, z]; };
+  for (let j = 0; j < 5; j++) { const [x, z] = at(j * 100 + 50, 60); items.push(['rw', x, z]); const [tx, tz] = at(j * 100 + 50, 150); items.push(['twy', tx, tz]); }
+  for (let j = 0; j < 3; j++) { const [x, z] = at(40 + j * 160 + r() * 30, 250); items.push([r() < 0.8 ? 'hangar' : 'bldg', x, z, Math.PI / 2 * sd]); }
+  for (let j = 0; j < 4; j++) { const [x, z] = at(r() * 500, 170 + r() * 20); items.push([r() < 0.7 ? 'jet' : 'heli', x, z, Math.PI / 2 * sd + (r() - 0.5) * 0.3]); }
+  for (let j = 0; j < 2; j++) { const [x, z] = at(r() * 500, 330 + r() * 50); items.push(['bldg', x, z, r() * 0.3]); }
+  if (r() < 0.6) { const [x, z] = at(r() * 500, 370); items.push(['radar', x, z, r() * 6]); }
+  if (r() < 0.25) { const [x, z] = at(r() * 500, -120); items.push(['radar', x, z, r() * 6]); }
+  for (let j = 0; j < 2; j++) { const [x, z] = at(r() * 500, r() < 0.5 ? -60 - r() * 60 : 300 + r() * 80); items.push(['sam', x, z, r() * 6.28]); if (r() < 0.6) items.push(['sam', x + 12, z + 8, r() * 6.28]); }
+  for (let j = 0; j < 3; j++) { const [x, z] = at(r() * 500, 120 + r() * 40); items.push(['truck', x, z, r() * 6.28]); }
+  for (let j = 0; j < 2; j++) { const [x, z] = at(r() * 500, 200 + r() * 150); items.push([r() < 0.5 ? 'fuel' : 'gen', x, z, r() * 6.28]); }
+  for (const off of [-170, BASE_HALF - 20]) { const [x, z] = at(250, off); items.push(['fence', x, z]); }
+  for (let j = 0; j < 5; j++) { const [x, z] = at(j * 100, 210); items.push(['pole', x, z]); }
   sg = { items }; BASE.segs.set(key, sg); if (BASE.segs.size > 600) BASE.segs.delete(BASE.segs.keys().next().value); return sg;
 }
 function updateBase() {
   for (const k in BASE) if (BASE[k].isInstancedMesh) BASE[k].count = 0;
   const d = S.dist, A = RX.air.find((a) => d > a.start - 3000 && d < a.end + 1000);
   if (A && S.mode !== 'attract') {
-    const k0 = Math.max(0, Math.floor((d - A.start - 1000) / 500)), k1 = Math.min(199, Math.floor((d - A.start + 7000) / 500));
+    const k0 = Math.max(0, Math.floor((d - A.start - 1000) / 500)), k1 = Math.min(199, Math.floor((d - A.start + 5000) / 500));
     const t = S.t;
     for (let k = k0; k <= k1; k++) for (const it of baseSeg(A, k).items) {
       const [ty, x, z, ry = 0] = it, y = world.surface(x, z);
@@ -3122,6 +3145,10 @@ function updateBase() {
       else if (ty === 'jet') { bPut(BASE.jetBody, x, y + 1.6, z, ry); bPut(BASE.jetWing, x, y + 1.6, z + 1, ry); }
       else if (ty === 'bldg') bPut(BASE.bldg, x, y + 4.5, z, ry);
       else if (ty === 'gen') bPut(BASE.gen, x, y + 1.5, z, ry);
+      else if (ty === 'twy') bPut(BASE.twy, x, y + 0.18, z);
+      else if (ty === 'fence') bPut(BASE.fence, x, y + 1.5, z);
+      else if (ty === 'pole') { bPut(BASE.pole, x, y + 6, z); bPut(BASE.poleLamp, x, y + 12, z); }
+      else if (ty === 'heli') { bPut(BASE.heliBody, x, y + 2, z, ry); bPut(BASE.heliRotor, x, y + 3.8, z, ry + t * 0.3); bPut(BASE.heliRotor, x, y + 3.8, z, ry + t * 0.3 + 1.57); }
     }
   }
   for (const k in BASE) if (BASE[k].isInstancedMesh) BASE[k].instanceMatrix.needsUpdate = true;
