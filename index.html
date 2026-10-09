@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=31">
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
 </head>
 <body>
@@ -56,15 +56,22 @@
   <div id="rxQuick"><button id="rxWaveBtn" class="ui rq">❄ WAVE</button><button id="rxCamBtn" class="ui rq">🎥 MSL CAM</button><button id="rxLandBtn" class="ui rq hidden">LAND</button></div>
   <span id="rxAmmo"></span>
   <button id="rxExit" class="ui hidden">✕ EXIT MISSILE CAM</button>
+  <div id="rxPip" class="hidden"><span id="rxPipL">LIVE</span></div>
+  <div id="rxFlash"></div>
+  <div id="rxCard" class="ui hidden"><b>☄ SCOUT: STRIKE READY</b><span>Huge blast clears ~3.5 km of route ahead · 2 min cooldown</span><div><button id="rxCardYes" class="ui mx on">APPROVE · Y</button><button id="rxCardNo" class="ui mx">DECLINE</button></div></div>
+  <div id="rxScrim" class="hidden"></div>
   <div id="rxMenu" class="ui hidden">
-    <div class="mh">FLIGHT MODES <span>M</span></div>
+    <div class="mh">FLIGHT MODES <button id="rxMenuX" class="ui" aria-label="Close">✕</button></div>
     <button id="mxWing" class="ui mx">WINGMEN OFF</button><button id="mxWave" class="ui mx">❄ FREEZE SHOCKWAVE · Q</button>
     <button id="mxCam" class="ui mx">🎥 MISSILE CAM · C</button><button id="mxWar" class="ui mx">WARHEAD · HIGH-EXPLOSIVE</button>
     <button id="mxUltra" class="ui mx">ULTRA · OFF</button><button id="mxBlast" class="ui mx">⚡ BLAST → PORTAL · B</button>
     <button id="mxLand" class="ui mx">LAND / TAKE OFF · L</button><button id="mxGhost" class="ui mx">GHOST · OFF</button>
     <button id="mxScan" class="ui mx">AI SCANNER · ON</button><button id="mxVoice" class="ui mx">VOICE · ON</button>
-    <button id="mxG" class="ui mx">G-EFFECTS · ON</button>
-    <div class="mk">Keys: G wingmen · Q wave · C missile cam · V warhead · U ultra · B blast · L land · P ghost · I scanner · O voice · M menu</div>
+    <button id="mxG" class="ui mx">G-EFFECTS · ON</button><button id="mxSwipe" class="ui mx">SWIPE STEER · OFF</button>
+    <div class="mh">ESCORTS</div>
+    <button id="mxCarrier" class="ui mx">CARRIER ESCORT · OFF</button><button id="mxDrone" class="ui mx">SCOUT DRONE · OFF</button>
+    <button id="mxPip" class="ui mx">FEED · OFF</button>
+    <div class="mk">Keys: G wingmen · Q wave · C missile cam · V warhead · U ultra · B blast · L land · P ghost · I scanner · O voice · K carrier · J drone · N feed · H swipe steer · Y approve strike · M / Esc menu. Swipe sideways or tap outside to close.</div>
   </div>
   <div id="hint">Tilt to steer · right bar = throttle · left bar = climb / dive</div>
 </div>
@@ -126,6 +133,6 @@
 </div></div>
 <div id="rotate" class="hidden">↻ Landscape recommended</div>
 <div id="err" class="hidden"></div>
-<script type="module" src="js/main.js"></script>
+<script type="module" src="js/main.js?v=31"></script>
 </body>
 </html>

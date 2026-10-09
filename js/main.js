@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js';
-import { loadAssets } from './assets.js';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=31';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=31';
+import { loadAssets } from './assets.js?v=31';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js';
-import { GpuDust } from './gpudust.js';
-import { PostFX } from './postfx.js';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js';
-import { GameAudio } from './audio.js';
-import { Controls } from './input.js';
+import { Grass } from './grass.js?v=31';
+import { GpuDust } from './gpudust.js?v=31';
+import { PostFX } from './postfx.js?v=31';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=31';
+import { GameAudio } from './audio.js?v=31';
+import { Controls } from './input.js?v=31';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -2528,6 +2528,7 @@ function drawG() {
 // ---------- shared hooks ----------
 function rxForceAP() { return !!(RX.ride || RX.blast); }
 function rxReset() {
+  if (RX.strikeOffer) strikeCard(false); RX.strikeCool = 40;
   RX.nearZones.length = 0; RX.above = false; RX.air = rxGenAir(S.seed);
   for (const e of RX.enemies) { e.mesh.visible = false; e.mesh.userData.used = false; } RX.enemies.length = 0;
   for (const s of shotPool) { s.on = false; s.s.visible = false; }
@@ -2541,7 +2542,7 @@ function rxUpdate(dt, rdt) { // dt = game (possibly slow-mo) time, rdt = real ti
   RX.timeScale = damp(RX.timeScale, RX.ride ? 0.3 : 1, 6, rdt);
   RX.joltT = Math.max(0, RX.joltT - dt);
   RX.jolt = RX.joltT > 0 ? RX.joltDir * 0.6 * (RX.joltT / 0.7) * (S.autopilot || rxForceAP() ? 0.2 : 1) + Math.sin(S.t * 60) * 0.15 * RX.joltT : 0;
-  updateHazards(dt); updateWingmen(dt); updateFreeze(dt); updateBlast(dt); updateHostiles(dt); updateG(dt);
+  updateHazards(dt); updateWingmen(dt); updateEscorts(dt); updateFreeze(dt); updateBlast(dt); updateHostiles(dt); updateG(dt);
   if (RX.instDirty) { RX.instDirty = false; rebuildInstances(); }
   RX.hudT -= rdt;
   if (RX.hudT <= 0 && S.mode === 'playing') {
@@ -2593,26 +2594,127 @@ function rxMenuSync() {
   set('mxScan', RX.scanner ? 'AI SCANNER · ON' : 'AI SCANNER · OFF', RX.scanner);
   set('mxVoice', RX.voice ? 'VOICE · ON' : 'VOICE · OFF', RX.voice);
   set('mxG', RX.gfx ? 'G-EFFECTS · ON' : 'G-EFFECTS · OFF', RX.gfx);
+  set('mxCarrier', RX.carrier ? 'CARRIER + 2 JETS · ON' : 'CARRIER ESCORT · OFF', RX.carrier);
+  set('mxDrone', RX.drone ? 'SCOUT DRONE · ON' : 'SCOUT DRONE · OFF', RX.drone);
+  set('mxPip', PIP_NAMES[RX.pip], RX.pip > 0);
+  set('mxSwipe', controls.swipeSteer ? 'SWIPE STEER · ON' : 'SWIPE STEER · OFF', controls.swipeSteer);
   const vc = $('voiceChip'); if (vc) vc.textContent = 'Voice callouts: ' + (RX.voice ? 'ON' : 'OFF');
   $('rxScan').classList.toggle('hidden', !RX.scanner);
 }
-function rxMenu(open) { const m = $('rxMenu'); const o = open ?? m.classList.contains('hidden'); m.classList.toggle('hidden', !o); $('rxTab').classList.toggle('on', o); }
+function rxMenu(open) { const m = $('rxMenu'); const o = open ?? m.classList.contains('hidden'); m.classList.toggle('hidden', !o); $('rxScrim').classList.toggle('hidden', !o); $('rxTab').classList.toggle('on', o); }
+// ---------- optional escorts: command carrier (+2 helpers) and scout drone with live camera feeds ----------
+RX.carrier = false; RX.drone = false; RX.pip = 0; RX.strikeCool = 40; RX.strikeOffer = false; RX.strikeFx = 0;
+let carrier = null, drone = null;
+const PIP_NAMES = ['FEED · OFF', 'FEED · CARRIER CAM', 'FEED · SCOUT CAM'];
+function ensureCarrier() {
+  if (carrier) return;
+  const m = makeJet(new THREE.Color(0x2a2f36), new THREE.Color(0x8a5a1c)); m.scale.setScalar(4.2);
+  carrier = { mesh: m, p: S.pos.clone(), fireT: 1, roll: 0, helpers: [-1, 1].map((side) => ({ side, mesh: makeJet(new THREE.Color(0x5b4a2e), new THREE.Color(0x2a1d0e)), p: S.pos.clone() })) };
+}
+function ensureDrone() {
+  if (drone) return;
+  const m = makeJet(new THREE.Color(0xb9c2cc), new THREE.Color(0x22d3ff)); m.scale.setScalar(0.45);
+  drone = { mesh: m, p: S.pos.clone() };
+}
+function setCarrier(on) { RX.carrier = on; ensureCarrier(); if (on) { headingFrame(S.heading); carrier.p.copy(S.pos).addScaledVector(_rf, -200).add(new THREE.Vector3(0, 60, 0)); for (const h of carrier.helpers) h.p.copy(carrier.p); } else if (RX.pip === 1) RX.pip = 0; pop(on ? 'CARRIER ESCORT · MISSILE SUPPORT' : 'CARRIER ESCORT OFF', 'banked'); rxMenuSync(); }
+function setDrone(on) { RX.drone = on; ensureDrone(); if (on) drone.p.copy(S.pos); else { if (RX.pip === 2) RX.pip = 0; strikeCard(false); } pop(on ? 'SCOUT DRONE · LIVE FEED' : 'SCOUT DRONE OFF', 'banked'); rxMenuSync(); }
+function cyclePip() { let n = RX.pip; for (let i = 0; i < 3; i++) { n = (n + 1) % 3; if (n === 0 || (n === 1 && RX.carrier) || (n === 2 && RX.drone)) break; } RX.pip = n; $('rxPip').classList.add('hidden'); rxMenuSync(); }
+function flyTo(o, tgt, k, pad, dt) { o.p.lerp(tgt, 1 - Math.exp(-k * dt)); o.p.y = safeAlt(o.p.x, o.p.y, o.p.z, pad); }
+function updateEscorts(dt) {
+  const live = S.mode !== 'crashed';
+  headingFrame(S.heading);
+  if (carrier) {
+    const on = RX.carrier && live; carrier.mesh.visible = on;
+    for (const h of carrier.helpers) h.mesh.visible = on;
+    if (on) {
+      _rq.copy(S.pos).addScaledVector(_rf, -240).addScaledVector(_rr, 90); _rq.y = Math.max(S.pos.y + 95, _rq.y);
+      flyTo(carrier, _rq, 2.2, 30, dt); carrier.roll = damp(carrier.roll, S.roll * 0.35, 2, dt);
+      carrier.mesh.position.copy(carrier.p); carrier.mesh.rotation.set(S.pitch * 0.5, S.heading, carrier.roll);
+      for (const h of carrier.helpers) {
+        _rq.copy(carrier.p).addScaledVector(_rr, h.side * 55).addScaledVector(_rf, -25); _rq.y -= 6;
+        flyTo(h, _rq, 5, 10, dt); h.mesh.position.copy(h.p); h.mesh.rotation.set(S.pitch, S.heading, S.roll * 0.7);
+      }
+      if (S.mode === 'playing' && !S.land) { // smart missile support: picks the most urgent threat nobody is covering yet
+        carrier.fireT -= dt;
+        if (carrier.fireT <= 0) {
+          let tgt = null; for (const c of MS.cands) if (!c.o.dead && incoming(c.o) < needed(c.o) && (c.tti < 4 || c.o.jet)) { tgt = c.o; break; }
+          const from = carrier.helpers[(carrier.k = (carrier.k || 0) ^ 1)].p;
+          carrier.fireT = tgt && fireMissile({ from: tgt.jet ? carrier.p : from, free: true, tgt }) ? 0.7 : 0.2;
+        }
+      }
+    }
+  }
+  if (drone) {
+    const on = RX.drone && live; drone.mesh.visible = on;
+    if (on) {
+      const k = clamp(Math.round(MPATH.length * 0.8), 4, MPATH.length - 1); _rq.copy(MPATH[k]); _rq.y += 45;
+      flyTo(drone, _rq, 2.5, 35, dt); drone.mesh.position.copy(drone.p); drone.mesh.rotation.set(0, S.heading, Math.sin(S.t * 1.3) * 0.15);
+      RX.strikeCool = Math.max(0, RX.strikeCool - dt);
+      if (RX.strikeCool <= 0 && !RX.strikeOffer && S.mode === 'playing') strikeCard(true);
+    }
+  }
+  if (RX.strikeFx > 0) { RX.strikeFx -= dt; $('rxFlash').style.opacity = clamp(RX.strikeFx * 1.6, 0, 1).toFixed(2); }
+}
+function strikeCard(show) { RX.strikeOffer = show; $('rxCard').classList.toggle('hidden', !show); if (show) rxSay('Scout has a strike lined up. Approve?', 'strike'); }
+function scoutStrike() {
+  strikeCard(false); RX.strikeCool = 120;
+  if (S.mode !== 'playing') return;
+  audio.boom(); audio.explode(); flash(1); RX.strikeFx = 1.1; S.shake = Math.max(S.shake, 1.6);
+  pop('☄ SCOUT STRIKE · ROUTE CLEARED', 'unlock'); rxSay('Strike inbound. Route cleared.', 'strike2');
+  const cur = Math.floor(-S.pos.z / CHUNK_L), span = Math.ceil(3500 / CHUNK_L); let n = 0;
+  for (let i = cur; i <= cur + span; i++) {
+    const ch = chunks.get(i); if (!ch) continue;
+    for (const o of ch.objs) {
+      if (o.dead || (o.type === 'boulder' && o.r < 3)) continue;
+      if (Math.abs(o.x - world.pathX(o.z)) > 320) continue;
+      if (n++ % 6 === 0 && n < 120) { aimPoint(o, _rq); shock.spawn(_rq.clone(), new THREE.Vector3(0, 1, 0), 120, 0.9, new THREE.Color(1.6, 0.9, 0.4), 0.8); }
+      o.dead = true; S.score += 25; MS.kills++;
+    }
+  }
+  RX.instDirty = true;
+  headingFrame(S.heading);
+  shock.spawn(S.pos.clone().addScaledVector(_rf, 300), new THREE.Vector3(0, 1, 0), 900, 1.4, new THREE.Color(1.8, 1.2, 0.6), 1);
+  for (const e of RX.enemies) if (!e.dead) damageJet(e, 99, e.p);
+}
+// picture-in-picture feed (low-res corner render after the main frame; skipped when quality drops)
+const pipCam = new THREE.PerspectiveCamera(62, 16 / 10, 1, 9000);
+function renderPip() {
+  if (!RX.pip || RX.ride) { $('rxPip').classList.add('hidden'); return; }
+  const src = RX.pip === 1 ? carrier : drone; if (!src || !src.mesh.visible) { $('rxPip').classList.add('hidden'); return; }
+  const el = $('rxPip'); if (el.classList.contains('hidden')) { el.classList.remove('hidden'); $('rxPipL').textContent = RX.pip === 1 ? '● LIVE · CARRIER' : '● LIVE · SCOUT'; }
+  if (RX.pipSkip = !RX.pipSkip && quality.pr < quality.maxPR * 0.8) return; // half-rate feed on reduced quality
+  headingFrame(S.heading);
+  if (RX.pip === 1) { pipCam.position.copy(src.p).addScaledVector(_rf, -20); pipCam.position.y += 14; pipCam.lookAt(_rq.copy(S.pos).addScaledVector(_rf, 120)); }
+  else { pipCam.position.copy(src.p).addScaledVector(_rf, 6); pipCam.position.y -= 2; pipCam.lookAt(_rq.copy(src.p).addScaledVector(_rf, 400).setY(src.p.y - 70)); }
+  const r = el.getBoundingClientRect(), H = innerHeight;
+  pipCam.aspect = r.width / r.height; pipCam.updateProjectionMatrix();
+  const auto = renderer.autoClear, tgt = renderer.getRenderTarget();
+  renderer.setRenderTarget(null); renderer.setScissorTest(true);
+  renderer.setViewport(r.left, H - r.bottom, r.width, r.height); renderer.setScissor(r.left, H - r.bottom, r.width, r.height);
+  renderer.autoClear = true; renderer.render(scene, pipCam);
+  renderer.setScissorTest(false); renderer.setViewport(0, 0, innerWidth, innerHeight); renderer.autoClear = auto; renderer.setRenderTarget(tgt);
+}
 const RX_ACT = {
   mxWing: () => setWing((RX.wing + 1) % 3), mxWave: () => freezeWave(), mxCam: () => rideToggle(),
   mxWar: () => { RX.warhead = RX.warhead === 'he' ? 'freeze' : 'he'; pop(RX.warhead === 'freeze' ? '❄ FREEZE WARHEADS' : 'HIGH-EXPLOSIVE WARHEADS', 'banked'); rxMenuSync(); },
   mxUltra: () => setUltra(!RX.ultra), mxBlast: () => blastGo(), mxLand: () => rxLandToggle(), mxGhost: () => setGhost(!RX.ghost),
   mxScan: () => { RX.scanner = !RX.scanner; rxMenuSync(); }, mxVoice: () => setVoice(!RX.voice),
   mxG: () => { RX.gfx = !RX.gfx; localStorage.setItem('canyon.gfx', RX.gfx ? '1' : '0'); rxMenuSync(); },
+  mxCarrier: () => setCarrier(!RX.carrier), mxDrone: () => setDrone(!RX.drone), mxPip: () => cyclePip(),
+  mxSwipe: () => { controls.swipeSteer = !controls.swipeSteer; localStorage.setItem('canyon.swipe', controls.swipeSteer ? '1' : '0'); pop(controls.swipeSteer ? 'SWIPE STEERING ON · DRAG TO FLY' : 'SWIPE STEERING OFF', 'banked'); rxMenuSync(); },
+  rxCardYes: () => scoutStrike(), rxCardNo: () => { strikeCard(false); RX.strikeCool = 45; }, rxMenuX: () => rxMenu(false),
   rxWaveBtn: () => freezeWave(), rxCamBtn: () => rideToggle(), rxExit: () => endRide(), rxLandBtn: () => rxLandToggle(),
 };
 for (const id in RX_ACT) { const el = $(id); if (!el) continue; el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); audio.resume(); RX_ACT[id](); }); el.addEventListener('click', (e) => e.stopPropagation()); }
 $('rxTab').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); rxMenu(); });
 $('rxTab').addEventListener('click', (e) => e.stopPropagation());
-$('rxMenu').addEventListener('pointerdown', (e) => e.stopPropagation());
+$('rxMenu').addEventListener('pointerdown', (e) => { e.stopPropagation(); RX.mSw = { x: e.clientX, y: e.clientY }; });
+$('rxMenu').addEventListener('pointerup', (e) => { const w = RX.mSw; RX.mSw = null; if (w && Math.abs(e.clientX - w.x) > 60 && Math.abs(e.clientX - w.x) > Math.abs(e.clientY - w.y) * 1.5) rxMenu(false); }); // swipe sideways to dismiss
+$('rxScrim').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); rxMenu(false); }); // tap outside closes
 $('voiceChip').addEventListener('click', (e) => { e.stopPropagation(); setVoice(!RX.voice); });
 addEventListener('keydown', (e) => {
   if (e.repeat || S.mode !== 'playing') return;
-  const k = { KeyG: 'mxWing', KeyQ: 'mxWave', KeyC: 'mxCam', KeyV: 'mxWar', KeyU: 'mxUltra', KeyB: 'mxBlast', KeyL: 'mxLand', KeyP: 'mxGhost', KeyI: 'mxScan', KeyO: 'mxVoice', KeyM: null }[e.code];
+  const k = { KeyG: 'mxWing', KeyQ: 'mxWave', KeyC: 'mxCam', KeyV: 'mxWar', KeyU: 'mxUltra', KeyB: 'mxBlast', KeyL: 'mxLand', KeyP: 'mxGhost', KeyI: 'mxScan', KeyO: 'mxVoice', KeyK: 'mxCarrier', KeyJ: 'mxDrone', KeyN: 'mxPip', KeyH: 'mxSwipe', KeyY: 'rxCardYes', KeyM: null }[e.code];
   if (e.code === 'KeyM') rxMenu(); else if (e.code === 'Escape') { if (RX.ride) endRide(); else rxMenu(false); } else if (k) RX_ACT[k]();
 });
 rxMenuSync();
@@ -2788,7 +2890,7 @@ function tick(dt, draw) {
   post.blur = quality.blur && S.mode !== 'crashed' ? clamp((S.speed * 3.6 - 900) / 1340, 0, 1) * 0.11 + (S.boostFx || 0) * 0.03 : 0;
   post.sat = 1 - 0.5 * Math.min(S.wx.rainK || 0, 1) - 0.25 * (S.wx.fogK || 0);
   { const rk = Math.min(S.wx.rainK || 0, 1); post.tint = post.tint || new THREE.Vector3(1, 1, 1); post.tint.set(1 - 0.17 * rk, 1 - 0.04 * rk, 1 + 0.14 * rk); }
-  if (draw) { post.render(scene, camera, S.t); adaptQuality(dt); }
+  if (draw) { post.render(scene, camera, S.t); renderPip(); adaptQuality(dt); }
 }
 requestAnimationFrame(frame);
 window.__game.ready = true;

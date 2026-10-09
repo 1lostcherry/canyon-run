@@ -28,7 +28,7 @@ export class Controls {
     this.fRoll = new OneEuro(1.4, 0.035); this.fPitch = new OneEuro(1.2, 0.03);
     this.pitchMode = +(localStorage.getItem('canyon.pitchMode') ?? 0); // 0 normal, 1 inverted, 2 off
     this.keys = {};
-    this.touchSteer = 0;
+    this.touchSteer = 0; this.touchPitch = 0; this.swT = [0, 0]; this.swipeSteer = localStorage.getItem('canyon.swipe') === '1';
     this.drag = null;
     this.enabled = false;
     this.lastOrientEvent = 0;
@@ -69,15 +69,21 @@ export class Controls {
       if (d.kind === 'alt') this.setAlt(e.clientY, d);
       else if (d.kind === 'thr') this.throttle = clamp(1 - (e.clientY - d.barTop) / d.barH, 0, 1);
       else {
-        this.throttle = clamp(d.t0 + (d.y0 - e.clientY) / (innerHeight * 0.6), 0, 1);
-        if (!this.hasTilt) this.touchSteer = clamp((e.clientX - d.x0) / (innerWidth * 0.22), -1, 1);
+        if (this.swipeSteer) { // proportional stick from the touch-start point: x = bank/turn, y = climb/dive
+          const R = Math.min(innerWidth, innerHeight) * 0.28, dz = 0.06;
+          const sh = (v) => { const a = Math.abs(v); return a < dz ? 0 : Math.sign(v) * Math.min((a - dz) / (1 - dz), 1); };
+          this.swT[0] = sh((e.clientX - d.x0) / R); this.swT[1] = sh((d.y0 - e.clientY) / R);
+        } else {
+          this.throttle = clamp(d.t0 + (d.y0 - e.clientY) / (innerHeight * 0.6), 0, 1);
+          if (!this.hasTilt) this.touchSteer = clamp((e.clientX - d.x0) / (innerWidth * 0.22), -1, 1);
+        }
       }
     });
     const end = (e) => {
       const d = this.drags.get(e.pointerId); if (!d) return;
       this.drags.delete(e.pointerId);
       if (d.kind === 'alt') this.altStick = 0; // spring back to centre = level hold
-      if (d.kind === 'swipe') this.touchSteer = 0;
+      if (d.kind === 'swipe') { this.touchSteer = 0; this.swT[0] = this.swT[1] = 0; } // spring back to neutral
       this.drag = this.drags.size ? [...this.drags.values()][0] : null;
     };
     el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
@@ -160,6 +166,11 @@ export class Controls {
       if (K.KeyS || K.ControlLeft) this.throttle = clamp(this.throttle - dt * 0.55, 0, 1);
     }
     this.tiltSteer = steer; this.tiltPitch = pitch;
+    if (this.swipeSteer || this.swS) { // smoothed swipe stick, adds on top of tilt
+      const k = 1 - Math.exp(-dt * 12); this.swS = this.swS || [0, 0];
+      this.swS[0] += (this.swT[0] - this.swS[0]) * k; this.swS[1] += (this.swT[1] - this.swS[1]) * k;
+      steer += this.swS[0]; pitch += this.swS[1];
+    }
     this.steer = clamp(steer + this._kx + this.touchSteer, -1, 1);
     this.pitch = clamp(pitch + this._ky + (this.altStick || 0), -1, 1);
   }

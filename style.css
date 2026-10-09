@@ -225,7 +225,7 @@ button.ui { -webkit-appearance: none; appearance: none; font-family: inherit; cu
 .rq { font: 800 10.5px/1 inherit; font-family: inherit; letter-spacing: 1.2px; color: #e6f8ff; padding: 9px 10px; border-radius: 12px; border: 1px solid rgba(160,230,255,0.55); background: rgba(5,25,40,0.5); min-width: 86px; }
 #rxAmmo { position: absolute; right: calc(var(--sar) + 70px); bottom: calc(var(--sab) + 104px); font-size: 12px; font-weight: 900; color: #9fe9ff; pointer-events: none; }
 #rxExit { position: absolute; left: 50%; top: calc(var(--sat) + 96px); transform: translateX(-50%); pointer-events: auto; font: 900 13px/1 inherit; font-family: inherit; letter-spacing: 2px; color: #fff; padding: 12px 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.7); background: rgba(160,30,10,0.65); z-index: 6; }
-#rxMenu { position: absolute; top: calc(var(--sat) + 10px); right: calc(var(--sar) + 60px); width: min(330px, 48vw); max-height: calc(100% - var(--sat) - var(--sab) - 24px); overflow-y: auto; -webkit-overflow-scrolling: touch; pointer-events: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 10px; border-radius: 14px; background: rgba(15,8,2,0.82); border: 1px solid rgba(255,200,140,0.45); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 7; }
+#rxMenu { pointer-events: auto; position: absolute; z-index: 30; top: calc(var(--sat) + 8px); left: calc(var(--sal) + 70px); width: min(440px, calc(100vw - var(--sal) - var(--sar) - 300px)); min-width: 250px; max-height: calc(100% - var(--sat) - var(--sab) - 16px); overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-y; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 10px; border-radius: 16px; background: rgba(20,12,6,0.86); border: 1px solid rgba(255,207,138,0.25); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-sizing: border-box; }
 #rxMenu.hidden { display: none; }
 #rxMenu .mh { grid-column: 1 / -1; font-size: 11px; font-weight: 900; letter-spacing: 2.5px; color: #ffcf8a; display: flex; justify-content: space-between; }
 #rxMenu .mh span { opacity: 0.6; }
@@ -233,3 +233,18 @@ button.ui { -webkit-appearance: none; appearance: none; font-family: inherit; cu
 .mx { font: 800 10px/1.2 inherit; font-family: inherit; letter-spacing: 1px; color: #fff; padding: 10px 6px; min-height: 40px; border-radius: 10px; border: 1px solid rgba(255,200,140,0.5); background: rgba(40,15,0,0.55); }
 .mx.on, #rxTab.on { background: linear-gradient(180deg, #bff3ff, #4cc4ff); color: #00202e; border-color: transparent; }
 @media (max-height: 430px) { #rxQuick { flex-direction: row-reverse; right: calc(var(--sar) + 60px); bottom: calc(var(--sab) + 108px); } .rq { min-width: 0; padding: 8px 8px; } #rxInfo { max-width: 46vw; } }
+
+#rxMenuX { pointer-events: auto; background: rgba(255,255,255,0.12); color: #fff; border: 0; border-radius: 10px; width: 34px; height: 30px; font-size: 16px; font-weight: 900; }
+#rxMenu .mh { align-items: center; }
+#rxScrim { position: fixed; inset: 0; z-index: 29; background: rgba(0,0,0,0.28); pointer-events: auto; }
+#rxScrim.hidden, #rxPip.hidden, #rxCard.hidden { display: none; }
+@media (orientation: portrait) { #rxMenu { left: calc(var(--sal) + 64px); right: calc(var(--sar) + 64px); width: auto; top: calc(var(--sat) + 120px); max-height: calc(100% - var(--sat) - var(--sab) - 300px); grid-template-columns: 1fr; } }
+#rxPip { position: absolute; left: calc(var(--sal) + 72px); bottom: calc(var(--sab) + 58px); width: min(220px, 26vw); aspect-ratio: 16 / 10; border: 2px solid rgba(120,220,255,0.7); border-radius: 10px; box-shadow: 0 0 0 1px rgba(0,0,0,0.5); pointer-events: none; }
+#rxPipL { position: absolute; top: 4px; left: 6px; font: 900 9px/1 system-ui; letter-spacing: 2px; color: #ff5a4a; text-shadow: 0 1px 2px #000; }
+#rxFlash { position: fixed; inset: 0; background: radial-gradient(circle at 50% 45%, #fff 0%, #ffe2a8 40%, rgba(255,150,60,0.6) 100%); opacity: 0; pointer-events: none; z-index: 25; }
+#rxCard { pointer-events: auto; position: absolute; z-index: 31; top: calc(var(--sat) + 90px); left: 50%; transform: translateX(-50%); width: min(340px, 60vw); padding: 10px 12px; border-radius: 14px; background: rgba(20,12,6,0.9); border: 1px solid rgba(255,180,90,0.6); color: #ffe6c2; display: flex; flex-direction: column; gap: 6px; font-size: 12px; text-align: center; }
+#rxCard b { letter-spacing: 2px; color: #ffcf8a; }
+#rxCard span { opacity: 0.8; font-size: 10.5px; }
+#rxCard div { display: flex; gap: 8px; }
+#rxCard .mx { flex: 1; }
+#rxTab { position: relative; z-index: 32; }
