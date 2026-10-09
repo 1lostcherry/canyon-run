@@ -83,7 +83,7 @@ export class Controls {
       const d = this.drags.get(e.pointerId); if (!d) return;
       this.drags.delete(e.pointerId);
       if (d.kind === 'alt') this.altStick = 0; // spring back to centre = level hold
-      if (d.kind === 'swipe') { this.touchSteer = 0; this.swT[0] = this.swT[1] = 0; } // spring back to neutral
+      if (d.kind === 'swipe') { this.touchSteer = 0; this.swT[0] = this.swT[1] = 0; if (this.swS) this.swS[0] = this.swS[1] = 0; } // spring back to neutral
       this.drag = this.drags.size ? [...this.drags.values()][0] : null;
     };
     el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
@@ -167,9 +167,11 @@ export class Controls {
     }
     this.tiltSteer = steer; this.tiltPitch = pitch;
     if (this.swipeSteer || this.swS) { // smoothed swipe stick, adds on top of tilt
-      const k = 1 - Math.exp(-dt * 12); this.swS = this.swS || [0, 0];
+      const k = 1 - Math.exp(-dt * 40); this.swS = this.swS || [0, 0];
       this.swS[0] += (this.swT[0] - this.swS[0]) * k; this.swS[1] += (this.swT[1] - this.swS[1]) * k;
-      steer += this.swS[0]; pitch += this.swS[1];
+      const held = this.drags && [...this.drags.values()].some((q) => q.kind === 'swipe');
+      if (held && this.swipeSteer) { steer = this.swS[0]; pitch = this.swS[1]; } else { steer += this.swS[0]; pitch += this.swS[1]; }
+      this.swipeHeld = !!held;
     }
     this.steer = clamp(steer + this._kx + this.touchSteer, -1, 1);
     this.pitch = clamp(pitch + this._ky + (this.altStick || 0), -1, 1);

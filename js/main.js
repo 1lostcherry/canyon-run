@@ -602,6 +602,7 @@ function gatherObstacles() {
     const ch = chunks.get(i); if (!ch) continue;
     for (const o of ch.objs) {
       if (o.dead) continue;
+      if (RX.ice && (o.type === 'tree' || o.type === 'jtree')) continue; // Ice Age: no vegetation
       if (o.type === 'boulder' && o.r < 3) continue;
       if (Math.abs(o.x - S.pos.x) > 900) continue;
       nearObs.push(o);
@@ -777,7 +778,7 @@ function autopilotInput(dt = 1 / 60) {
   // emergency: imminent terrain contact -> full climb regardless of plan
   if (APC.ter < margin * 0.6) pitch = 1;
   const urgent = bestHit < Infinity || bestClr < margin * 1.5;
-  AP.steer = damp(AP.steer, best[0], urgent ? 30 : 10, dt);
+  { const want = damp(AP.steer, best[0], urgent ? 30 : 8, dt), mx = (urgent ? 6 : 2.2) * dt; AP.steer = AP.steer + clamp(want - AP.steer, -mx, mx); }
   AP.pitch = damp(AP.pitch, pitch, urgent ? 30 : 12, dt);
   return { steer: AP.steer, pitch: AP.pitch };
 }
@@ -862,10 +863,21 @@ function setSafe(on) {
 
 function updateFlight(dt) {
   if (rxFlightOverride(dt)) return { thr: 0, spdN: spdNf(S.speed) };
+  if (S.engineFail && S.mode === 'playing') { // 7th hit: unpowered falling crash
+    S.fallV = (S.fallV || 0) + 9.81 * 3 * dt; S.speed = Math.max(S.speed - 120 * dt, 60);
+    headingFrame(S.heading); S.pos.addScaledVector(_rf, S.speed * dt); S.pos.y -= S.fallV * dt; S.roll += dt * 2.5; S.pitch = damp(S.pitch, -0.6, 2, dt);
+    ship.position.copy(S.pos); ship.rotation.set(S.pitch, S.heading, S.roll);
+    if (Math.random() < 0.8) dust.spawn(S.pos.x, S.pos.y, S.pos.z, 0, 3, 0, 2, 3, 12, 0.7, 0.1, 0.09, 0.09, 1, 1);
+    const g = world.surface(S.pos.x, S.pos.z); S.agl = S.pos.y - g; S.dist = Math.max(S.dist, -S.pos.z);
+    if (S.agl < 2) { S.crashCause = 'ENGINE FAILURE · 7 HITS'; crash(); }
+    return { thr: 0, spdN: spdNf(S.speed) };
+  }
   let steer = controls.steer, pitchIn = controls.pitch;
   gatherObstacles();
-  if (S.mode === 'playing' && S.autopilot && !TEST) { S.apOverT = (Math.abs(controls.steer) > 0.85 || Math.abs(controls.pitch) > 0.85) ? (S.apOverT || 0) + dt : 0; if (S.apOverT > 0.5) setAutopilot(false); }
-  if (S.mode === 'attract' || S.autopilot || rxForceAP()) { const a = S.apSub ? S.apLast : autopilotInput(S.apDt || dt); S.apLast = a; steer = a.steer; pitchIn = a.pitch; }
+  if (S.mode === 'playing' && S.autopilot && !TEST && !S.apManual) { S.apOverT = (Math.abs(controls.steer) > 0.85 || Math.abs(controls.pitch) > 0.85) ? (S.apOverT || 0) + dt : 0; if (S.apOverT > 0.5) setAutopilot(false); }
+  S.apManual = S.mode === 'playing' && S.autopilot && safeMode && !rxForceAP();
+  if (S.apManual) { autopilotInput(S.apDt || dt); const a = safeAssist(steer, pitchIn, dt); steer = a.steer; pitchIn = a.pitch; }
+  else if (S.mode === 'attract' || S.autopilot || rxForceAP()) { const a = S.apSub ? S.apLast : autopilotInput(S.apDt || dt); S.apLast = a; steer = a.steer; pitchIn = a.pitch; }
   else if (S.mode === 'playing' && safeMode) { const a = safeAssist(steer, pitchIn, dt); steer = a.steer; pitchIn = a.pitch; }
   const thr = S.mode === 'attract' ? Math.min(0.38, AP.thrCap) : (S.autopilot || rxForceAP()) ? Math.min(controls.throttle, AP.thrCap) : controls.throttle;
   if (S.hp && S.mode === 'playing') steer += ((100 - S.hp.R) - (100 - S.hp.L)) * 0.0028;
@@ -875,7 +887,7 @@ function updateFlight(dt) {
   // speed
   let target = (MIN_KMH + thr * (TOP_KMH - MIN_KMH)) / 3.6 * (1 - 0.2 * (S.snowK || 0));
   if (S.boost > 0) { S.boost -= dt; target = Math.min(target + 320 / 3.6, TOP_KMH / 3.6); }
-  if (RX.blast) target = 45000 / 3.6;
+  if (RX.blast) target = (RX.blast.hyper ? HYPER_KMH : BLAST_KMH) / 3.6;
   const kmhNow = S.speed * 3.6; // accel/brake authority scales with speed (8700 km/h airframe); autopilot governor brakes hard
   const rate = RX.blast && target > S.speed ? 9000 : (target > S.speed ? (S.boost > 0 ? 700 : 360) + kmhNow * 0.12 : (300 + kmhNow * 0.3) * (S.autopilot && AP.thrCap < 0.9 ? 2.5 : 1)) / 3.6 * (RX.blast ? 1 : 1);
   S.prevSpeed = S.speed;
@@ -906,6 +918,8 @@ function updateFlight(dt) {
   if (S.rollT > 0) { S.rollT -= dt; const u = 1 - Math.max(S.rollT, 0) / 0.75; rollAnim = S.rollDir * Math.PI * 2 * (u * u * (3 - 2 * u)); }
   ship.rotation.set(S.pitch + (S.speed - S.prevSpeed) / dt * -0.0006, S.heading + S.steerS * 0.06, S.roll + rollAnim);
   S.dist = Math.max(S.dist, -S.pos.z);
+  if (S.mode === 'playing' && !S.boom100 && S.speed * 3.6 >= 100000) { S.boom100 = true; S.boom100N = (S.boom100N || 0) + 1; megaBoom(); }
+  if (S.mode === 'playing') { const m = Math.floor(S.speed * 3.6 / MACH_KMH); if (m > (S.machStep || 0) && m <= 4) { S.machStep = m; audio.boom(); shock.spawn(S.pos.clone(), _v.copy(S.vel).normalize().clone(), 60 + m * 30, 0.6, new THREE.Color(1.2, 1.1, 1), 0.6); } else if (m < (S.machStep || 0) - 1) S.machStep = m; }
   if (S.mode === 'playing') { S.time += dt; S.topKmh = Math.max(S.topKmh, S.speed * 3.6); }
   return { thr, spdN };
 }
@@ -1891,6 +1905,7 @@ const ROOF_THICK = 24, ROOF_CLR = 5, DECK_HALF = 1100;
 const ICE_TINT = new THREE.Color(1.55, 1.65, 1.9);
 const spdNf = (sp) => Math.min(sp / (MAX_KMH / 3.6), 1);
 let TOP_KMH = MAX_KMH;
+const ULTRA_KMH = 35620, BLAST_KMH = 124700, HYPER_KMH = 470000, MPOV_KMH = 500;
 
 // ---------- 1) UPPER WORLD: sky-deck zones with escape holes ----------
 function rxPatchWorld(w) {
@@ -1902,7 +1917,7 @@ function rxGenZones(seed) {
   let d = params.has('roof') ? 700 : 6500 + rnd() * 5000;
   while (d < 3e6) {
     const len = 7000 + rnd() * 5000, holes = [];
-    for (let h = d + 1100 + rnd() * 500; h < d + len - 500; h += 1500 + rnd() * 1300) holes.push([h, h + 380 + rnd() * 80]);
+    for (let h = d + 1100 + rnd() * 500; h < d + len - 500; h += 1500 + rnd() * 1300) { const w = 380 + rnd() * 80; if (params.has('holes')) holes.push([h, h + w]); } // skyholes disabled: deck is sealed visually and physically
     Z.push({ start: d, end: d + len, holes, b: null, t: null, mesh: null });
     d += len + 24000 + rnd() * 22000;
   }
@@ -1930,7 +1945,7 @@ function buildDeck(zn) {
   const cut = [[zn.start, zn.end]];
   // spans of solid deck between holes
   const spans = []; let s = zn.start; for (const h of zn.holes) { spans.push([s, h[0]]); s = h[1]; } spans.push([s, zn.end]);
-  const rimC = [0.32, 0.25, 0.17], botC = [0.17, 0.13, 0.1];
+  const ICEDK = RX.ice; zn.iceBuilt = ICEDK; const rimC = ICEDK ? [0.62, 0.72, 0.82] : [0.32, 0.25, 0.17], botC = ICEDK ? [0.45, 0.55, 0.66] : [0.17, 0.13, 0.1];
   for (const [d0, d1] of spans) {
     for (let d = d0; d < d1 - 0.01; d += SL) {
       const e = Math.min(d + SL, d1), z0 = -d, z1 = -e, cx = world.pathX(-(d + e) / 2);
@@ -1938,7 +1953,7 @@ function buildDeck(zn) {
       for (let i = 0; i < NX; i++) {
         const xa = x0 + i * dx, xb = xa + dx;
         const n = world.noise(xa * 0.004 + 3.1, d * 0.004), m = world.noise(xa * 0.02, d * 0.02);
-        const col = [0.13 + 0.09 * n + 0.04 * m, 0.2 + 0.1 * n, 0.07 + 0.04 * m];
+        const col = ICEDK ? [0.7 + 0.1 * n, 0.78 + 0.1 * n, 0.88 + 0.06 * m] : [0.13 + 0.09 * n + 0.04 * m, 0.2 + 0.1 * n, 0.07 + 0.04 * m];
         quad([xa, t, z0], [xb, t, z0], [xb, t, z1], [xa, t, z1], [0, 1, 0], col);
       }
       quad([x0, b, z1], [x1, b, z1], [x1, b, z0], [x0, b, z0], [0, -1, 0], botC);
@@ -1975,6 +1990,7 @@ function rxUpdateZones() {
     if (zn.end < d - 1500) { if (zn.mesh) { scene.remove(zn.mesh); zn.mesh.geometry.dispose(); zn.mesh = null; } continue; }
     if (!zoneReady(zn)) continue;
     RX.nearZones.push(zn);
+    if (zn.mesh && zn.iceBuilt !== RX.ice) { scene.remove(zn.mesh); zn.mesh.geometry.dispose(); zn.mesh = null; }
     if (!zn.mesh && zn.start < d + 9000) buildDeck(zn);
   }
 }
@@ -2186,7 +2202,7 @@ function rideToggle() {
   if (RX.ride) { endRide(); return; }
   if (S.mode !== 'playing' || S.land) return;
   const m = fireMissile({ ride: true }); if (!m) { pop('NO MISSILES', 'close'); return; }
-  RX.ride = m; $('rxExit').classList.remove('hidden'); pop('MISSILE CAM · STEER WITH TILT / DRAG', 'unlock'); rxSay('Missile camera.', 'ride');
+  m.spd = MPOV_KMH / 3.6; m.v.setLength(m.spd); RX.ride = m; $('rxExit').classList.remove('hidden'); pop('MISSILE CAM · STEER WITH TILT / DRAG', 'unlock'); rxSay('Missile camera.', 'ride');
 }
 function endRide() { if (RX.ride) { RX.ride.ride = false; } RX.ride = null; $('rxExit').classList.add('hidden'); }
 function steerRide(m, dt) {
@@ -2227,10 +2243,16 @@ function freezeHit(o, p) { // freeze warhead: target + neighbours within 80 m fl
 }
 
 // ---------- 4) ULTRA speed + BLAST boost into the Ice Age portal ----------
+function megaBoom() { // one-shot destructive 100,000 km/h boom: shatters every obstacle within 1.5 km
+  flash(1); S.shake = 3; audio.boom(); audio.explode();
+  shock.spawn(S.pos.clone(), new THREE.Vector3(0, 1, 0), 1500, 1.4, new THREE.Color(1.4, 1.2, 1.0), 1);
+  let n = 0; for (const ch of chunks.values()) for (const o of ch.objs) if (!o.dead && Math.hypot(o.x - S.pos.x, o.z - S.pos.z) < 1500) { o.dead = true; n++; }
+  RX.instDirty = true; pop('100,000 KM/H · HYPERSONIC BOOM · ' + n + ' DESTROYED', 'unlock'); rxSay('Hypersonic boom.', 'boom');
+}
 function setUltra(on) {
-  RX.ultra = on; TOP_KMH = on ? 35000 : MAX_KMH;
+  RX.ultra = on; TOP_KMH = on ? ULTRA_KMH : MAX_KMH;
   hud.machMark.style.bottom = ((MACH_KMH - MIN_KMH) / (TOP_KMH - MIN_KMH) * 100) + '%';
-  pop(on ? 'ULTRA · TOP SPEED 35,000 KM/H' : 'ULTRA OFF · 8,700 KM/H', 'mach'); rxSay(on ? 'Ultra speed unlocked.' : 'Ultra off.', 'ultra'); rxMenuSync();
+  pop(on ? 'ULTRA · TOP SPEED 35,620 KM/H' : 'ULTRA OFF · 8,700 KM/H', 'mach'); rxSay(on ? 'Ultra speed unlocked.' : 'Ultra off.', 'ultra'); rxMenuSync();
 }
 const portalMat = new THREE.ShaderMaterial({
   uniforms: { time: { value: 0 }, k: { value: 0 }, ice: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
@@ -2245,10 +2267,11 @@ const portalMat = new THREE.ShaderMaterial({
 });
 const portal = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), portalMat); portal.visible = false; portal.frustumCulled = false; portal.renderOrder = 15; scene.add(portal);
 function blastGo() {
+  if (RX.blast && !RX.blast.hyper) { RX.blast.hyper = true; pop('HYPER · 470,000 KM/H', 'mach'); return; }
   if (S.mode !== 'playing' || RX.blast || S.land) return;
   if (RX.blastCool > 0) { pop('BLAST RECHARGING ' + Math.ceil(RX.blastCool) + ' s', 'close'); return; }
   endRide(); RX.blast = { t: 0, portal: null, passed: false };
-  audio.boom(); flash(0.5); S.shake = 2; pop('BLAST · 45,000 KM/H · SHIELD UP', 'mach'); rxSay(RX.ice ? 'Blast. Portal home opening.' : 'Blast. Portal opening.', 'blast');
+  audio.boom(); flash(0.5); S.shake = 2; pop('BLAST · 124,700 KM/H · SHIELD UP', 'mach'); rxSay(RX.ice ? 'Blast. Portal home opening.' : 'Blast. Portal opening.', 'blast');
 }
 function updateBlast(dt) {
   RX.blastCool = Math.max(0, RX.blastCool - dt);
@@ -2287,12 +2310,14 @@ function rxIceEnv(dt) {
   RX.iceK = damp(RX.iceK, RX.ice ? 1 : 0, 2.5, dt);
   const k = RX.iceK; RX.iceTint.setRGB(1, 1, 1).lerp(ICE_TINT, k);
   treeMat.color.setRGB(1, 1, 1).lerp(_c.setRGB(1.4, 1.5, 1.7), k * 0.8); jungleMat.color.copy(treeMat.color);
+  const iceOn = RX.iceK > 0.5; for (const m of trees.meshes) m.visible = !iceOn; for (const m of jtrees.meshes) m.visible = !iceOn;
+  waterMat.uniforms.frozen && (waterMat.uniforms.frozen.value = RX.iceK);
   if (k < 0.002) return;
   const L = (arr, out) => out.lerp(_c.setRGB(arr[0], arr[1], arr[2], LIN), k);
   L(ICE_ENV.fog, FOG_BASE); L(ICE_ENV.hor, skyMat.uniforms.horC.value); L(ICE_ENV.mid, skyMat.uniforms.midC.value); L(ICE_ENV.zen, skyMat.uniforms.zenC.value);
   L(ICE_ENV.sun, sunLight.color); L(ICE_ENV.hs, hemi.color); L(ICE_ENV.hg, hemi.groundColor); L(ICE_ENV.water, waterMat.uniforms.waterCol.value);
   for (let i = 0; i < 3; i++) E.dust[i] = lerp(E.dust[i], ICE_ENV.dust[i], k);
-  waterMat.uniforms.swell.value *= 1 - 0.85 * k; waterMat.uniforms.sunCol.value.copy(sunLight.color);
+  waterMat.uniforms.swell.value *= 1 - k; // frozen sea: no swell waterMat.uniforms.sunCol.value.copy(sunLight.color);
   hazeU.hazeCol.value.lerp(_c.setRGB(0.8, 0.88, 1.0), k);
   if (k > 0.5) E.name = 'ICE AGE · ' + BIOME_NAMES[E.main];
 }
@@ -2301,7 +2326,7 @@ function rxIceEnv(dt) {
 function rxGenAir(seed) {
   const rnd = makeRng((seed ^ 0x68e31da4) >>> 0), A = [];
   let d = params.has('hostile') ? 1500 : 16000 + rnd() * 9000;
-  while (d < 3e6) { A.push({ start: d, end: d + 12000 + rnd() * 5000, spawned: 0, warned: false, nextT: 0, entered: false }); d += 45000 + rnd() * 30000; }
+  while (d < 3e6) { A.push({ base: true, start: d, end: d + 100000, spawned: 0, warned: false, nextT: 0, entered: false }); d += 100000 + 45000 + rnd() * 30000; }
   return A;
 }
 const shotPool = []; for (let i = 0; i < 12; i++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: new THREE.Color(1.6, 0.35, 0.25), blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, transparent: true })); s.scale.set(5, 5, 1); s.visible = false; scene.add(s); shotPool.push({ s, on: false, p: new THREE.Vector3(), v: new THREE.Vector3(), t: 0 }); }
@@ -2331,8 +2356,8 @@ function updateHostiles(dt) {
   while (RX.air.length && RX.air[0].end < d - 3000) RX.air.shift();
   const A = RX.air[0], inside = A && d >= A.start && d <= A.end;
   if (A && S.mode === 'playing') {
-    if (!A.warned && d > A.start - 4000) { A.warned = true; pop('⚠ HOSTILE AIRSPACE IN 4 KM', 'close'); rxSay('Warning. Hostile airspace ahead.', 'air'); }
-    if (inside) { A.nextT -= dt; const alive = RX.enemies.filter((e) => !e.dead).length; if (A.nextT <= 0 && alive < 2 && A.spawned < 6) { spawnJet(A); A.nextT = 3 + Math.random() * 2; } }
+    if (!A.warned && d > A.start - 4000) { A.warned = true; pop('⚠ MILITARY BASE (100 KM) IN 4 KM', 'close'); rxSay('Warning. Hostile airspace ahead.', 'air'); }
+    if (inside) { A.nextT -= dt; const alive = RX.enemies.filter((e) => !e.dead).length; if (A.nextT <= 0 && alive < 2 && A.spawned < 40) { spawnJet(A); A.nextT = 3 + Math.random() * 2; } }
   }
   RX.airTxt = !A || S.mode !== 'playing' ? '' : inside ? '⚠ HOSTILE AIRSPACE · ' + ((A.end - d) / 1000).toFixed(1) + ' KM · DOWNED ' + (S.jetKills || 0) : d > A.start - 4000 ? 'HOSTILE AIRSPACE IN ' + ((A.start - d) / 1000).toFixed(1) + ' KM' : '';
   headingFrame(S.heading);
@@ -2367,7 +2392,9 @@ function updateHostiles(dt) {
       s.on = false; s.s.visible = false;
       const floor = (S.autopilot || rxForceAP() || safeMode) ? 15 : 0;
       S.hp.B = Math.max(floor, S.hp.B - 9); S.noContactT = 0; flash(0.22); S.shake = Math.max(S.shake, 0.9); audio.scrape(0.8);
-      pop('HIT BY HOSTILE FIRE · HULL ' + Math.round(S.hp.B) + '%', 'close');
+      S.misHits = (S.misHits || 0) + 1;
+      pop('HIT BY HOSTILE FIRE ' + S.misHits + '/7 · HULL ' + Math.round(S.hp.B) + '%', 'close');
+      if (S.misHits >= 7 && !S.engineFail) { S.engineFail = true; pop('ENGINE FAILURE · GOING DOWN', 'close'); rxSay('Engine failure.', 'eng'); continue; }
       if (S.hp.B <= 0) { S.crashCause = 'SHOT DOWN'; crash(); }
       continue;
     }
@@ -2534,7 +2561,7 @@ function rxReset() {
   for (const s of shotPool) { s.on = false; s.s.visible = false; }
   RX.rocks.length = 0; RX.geysers.length = 0; RX.frozen.length = 0; RX.nextRock = 0; RX.nextGey = 0; RX.wave = null; waveMesh.visible = false;
   RX.blast = null; RX.blastCool = 0; portal.visible = false; endRide(); S.land = null; RX.freezeCool = 0; RX.g = 1; RX.gMax = 1; RX.blk = 0; RX.red = 0; RX.ph = S.heading; RX.pvy = 0;
-  RX.freezeAmmo = params.has('freezeammo') ? 6 : 0; S.jetKills = 0;
+  RX.freezeAmmo = params.has('freezeammo') ? 6 : 0; S.jetKills = 0; S.misHits = 0; S.engineFail = false; S.fallV = 0; S.boom100 = false; S.machStep = 0;
   if (RX.ice && !params.has('ice')) { RX.ice = false; } if (params.has('ice')) RX.ice = true;
 }
 function rxClearDeckMeshes() { for (const zn of RX.zones) if (zn.mesh) { scene.remove(zn.mesh); zn.mesh.geometry.dispose(); zn.mesh = null; } }
@@ -2748,6 +2775,7 @@ function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h; camera.updateProjectionMatrix();
+  document.body.classList.toggle('portrait', h > w);
 }
 addEventListener('resize', resize);
 resize();
@@ -2893,6 +2921,25 @@ function tick(dt, draw) {
   if (draw) { post.render(scene, camera, S.t); renderPip(); adaptQuality(dt); }
 }
 requestAnimationFrame(frame);
+
+// ---------- v32: hide/show controls (persistent handle) + voice control OFF/ON ----------
+function setUiOff(off) { document.body.classList.toggle('ui-off', off); $('trayHandle').textContent = off ? '›' : '‹'; if (off) rxMenu(false); }
+$('trayHandle').addEventListener('click', (e) => { e.stopPropagation(); setUiOff(!document.body.classList.contains('ui-off')); });
+const VC = { on: false, rec: null };
+function setVoiceCtl(on) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (on && !SR) { pop('VOICE CONTROL UNAVAILABLE · USE THE ‹ HANDLE', 'close'); on = false; }
+  VC.on = on; $('mxVc').textContent = '🎙 VOICE CONTROL · ' + (on ? 'ON' : 'OFF'); $('mxVc').classList.toggle('on', on);
+  if (VC.rec) { try { VC.rec.onend = null; VC.rec.stop(); } catch (e) {} VC.rec = null; }
+  if (!on) return;
+  const r = new SR(); r.continuous = true; r.interimResults = false; r.lang = 'en-US';
+  r.onresult = (ev) => { const t = ev.results[ev.results.length - 1][0].transcript.trim().toLowerCase(); if (/\boff\b/.test(t)) setUiOff(true); else if (/\bon\b/.test(t)) setUiOff(false); };
+  r.onerror = (ev) => { if (ev.error === 'not-allowed') { pop('MICROPHONE BLOCKED · USE THE ‹ HANDLE', 'close'); setVoiceCtl(false); } };
+  r.onend = () => { if (VC.on) try { r.start(); } catch (e) {} };
+  try { r.start(); VC.rec = r; pop('SAY "OFF" / "ON" TO HIDE / SHOW CONTROLS', 'banked'); } catch (e) { setVoiceCtl(false); }
+}
+$('mxVc').addEventListener('click', () => setVoiceCtl(!VC.on));
+window.__game.ui = { setUiOff, setVoiceCtl, megaBoom };
 window.__game.ready = true;
 if (TEST) {
   S.noCollide = !params.has('collide');

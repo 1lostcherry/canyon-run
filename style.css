@@ -248,3 +248,7 @@ button.ui { -webkit-appearance: none; appearance: none; font-family: inherit; cu
 #rxCard div { display: flex; gap: 8px; }
 #rxCard .mx { flex: 1; }
 #rxTab { position: relative; z-index: 32; }
+
+/* v32: hide/show tray with persistent restore handle */
+#trayHandle { position: absolute; left: calc(var(--sal, 0px) + 58px); bottom: calc(var(--sab, 0px) + 52px); z-index: 40; width: 34px; height: 34px; border-radius: 17px; background: rgba(20,8,0,0.6); color: #ffd9a8; border: 1px solid rgba(255,190,120,0.55); font: 700 18px system-ui; pointer-events: auto; }
+body.ui-off #tl, body.ui-off #tc, body.ui-off #tr, body.ui-off #thrBar, body.ui-off #fireBtn, body.ui-off #rxQuick, body.ui-off #rxInfo, body.ui-off #rxPip, body.ui-off #rxAmmo, body.ui-off #modes, body.ui-off #hint, body.ui-off #rxMenu, body.ui-off #rxScrim { display: none !important; }
