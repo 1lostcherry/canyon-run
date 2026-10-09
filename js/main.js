@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=35';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=35';
-import { loadAssets } from './assets.js?v=35';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=36';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=36';
+import { loadAssets } from './assets.js?v=36';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=35';
-import { GpuDust } from './gpudust.js?v=35';
-import { PostFX } from './postfx.js?v=35';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=35';
-import { GameAudio } from './audio.js?v=35';
-import { Controls } from './input.js?v=35';
+import { Grass } from './grass.js?v=36';
+import { GpuDust } from './gpudust.js?v=36';
+import { PostFX } from './postfx.js?v=36';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=36';
+import { GameAudio } from './audio.js?v=36';
+import { Controls } from './input.js?v=36';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -201,7 +201,7 @@ const WATER_BIOMES = { ocean: 1, coast: 1, fjord: 1, gorge: 1, jungle: 1 };
 // animated water: wave normals, fresnel sky reflection, sun glint; semi-transparent so shallows show turquoise sand
 const WTRAIL = []; for (let i = 0; i < 10; i++) WTRAIL.push(new THREE.Vector4(0, 0, 9, 0));
 const waterMat = new THREE.ShaderMaterial({
-  uniforms: { flow: { value: 0 }, hazeSun: hazeU.hazeSun, hazeCol: hazeU.hazeCol, hazeK: hazeU.hazeK, time: { value: 0 }, waterCol: { value: new THREE.Color(0.02, 0.2, 0.25) }, horC: skyMat.uniforms.horC, zenC: skyMat.uniforms.zenC, sunDir: { value: SUN }, sunCol: { value: new THREE.Color(1, 0.9, 0.75) }, fogColor: fogU.fogColor, fogNear: fogU.fogNear, fogFar: fogU.fogFar, glint: { value: 1 }, swell: { value: 1 },
+  uniforms: { flow: { value: 0 }, hazeSun: hazeU.hazeSun, hazeCol: hazeU.hazeCol, hazeK: hazeU.hazeK, time: { value: 0 }, waterCol: { value: new THREE.Color(0.02, 0.2, 0.25) }, horC: skyMat.uniforms.horC, zenC: skyMat.uniforms.zenC, sunDir: { value: SUN }, sunCol: { value: new THREE.Color(1, 0.9, 0.75) }, fogColor: fogU.fogColor, fogNear: fogU.fogNear, fogFar: fogU.fogFar, glint: { value: 1 }, swell: { value: 1 }, frozen: { value: 0 },
     trail: { value: WTRAIL }, wash: { value: 0 }, washR: { value: 8 }, shipP: { value: new THREE.Vector3() } },
   vertexShader: `uniform float time; uniform float swell; uniform float flow; varying vec3 vW;
     // long swells displace the surface (Gerstner, vertical + horizontal)
@@ -211,7 +211,7 @@ const waterMat = new THREE.ShaderMaterial({
       vec3 o = gw(w.xz, normalize(vec2(1.0, 0.25)), 210.0, 1.1, 0.6) + gw(w.xz, normalize(vec2(0.7, -0.7)), 140.0, 0.7, 0.6) + gw(w.xz, normalize(vec2(-0.3, 1.0)), 96.0, 0.45, 0.5);
       w.xyz += o * fade; vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
   fragmentShader: `
-    uniform float flow; uniform vec3 hazeSun; uniform vec3 hazeCol; uniform float hazeK; uniform float time; uniform vec3 waterCol; uniform vec3 horC; uniform vec3 zenC; uniform vec3 sunDir; uniform vec3 sunCol; uniform float glint; uniform float swell;
+    uniform float flow; uniform vec3 hazeSun; uniform vec3 hazeCol; uniform float hazeK; uniform float time; uniform vec3 waterCol; uniform vec3 horC; uniform vec3 zenC; uniform vec3 sunDir; uniform vec3 sunCol; uniform float glint; uniform float swell; uniform float frozen;
     uniform vec3 fogColor; uniform float fogNear; uniform float fogFar; uniform vec4 trail[10]; uniform float wash; uniform float washR; uniform vec3 shipP; varying vec3 vW;
     float hsh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
     float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(hsh(i), hsh(i + vec2(1, 0)), f.x), mix(hsh(i + vec2(0, 1)), hsh(i + vec2(1, 1)), f.x), f.y); }
@@ -257,12 +257,24 @@ const waterMat = new THREE.ShaderMaterial({
       }
       foam = clamp(foam + wk, 0.0, 1.0);
       col = mix(col, vec3(0.92, 0.95, 0.97) * (sunCol * 0.6 + 0.35), foam);
+      if (frozen > 0.001) { // Ice Age: static sea ice with cracks and snow patches (no waves, no wake)
+        vec2 q = vW.xz * 0.02;
+        float n1 = sin(q.x * 1.7 + sin(q.y * 1.3)) * sin(q.y * 1.9 + sin(q.x * 0.7));
+        float n2 = sin(q.x * 5.3 + q.y * 2.1) * sin(q.y * 4.7 - q.x * 1.6);
+        float crack = smoothstep(0.035, 0.0, abs(n1 * 0.6 + n2 * 0.4)) + smoothstep(0.02, 0.0, abs(sin(q.x * 3.1 - q.y * 0.4) * sin(q.y * 2.6 + q.x * 0.9))) * 0.6;
+        float snowP = smoothstep(0.15, 0.55, sin(vW.x * 0.004 + sin(vW.z * 0.003)) * sin(vW.z * 0.005 + 1.3) + n2 * 0.25);
+        vec3 ice = mix(vec3(0.62, 0.76, 0.86), vec3(0.80, 0.88, 0.94), 0.5 + 0.5 * n1) * (sunCol * 0.75 + 0.3);
+        ice = mix(ice, vec3(0.95, 0.97, 1.0) * (sunCol * 0.8 + 0.35), snowP);
+        ice = mix(ice, vec3(0.25, 0.38, 0.5), clamp(crack, 0.0, 1.0) * (1.0 - snowP) * 0.8);
+        ice += sunCol * pow(max(dot(reflect(-v, vec3(0.0, 1.0, 0.0)), sunDir), 0.0), 60.0) * 0.4 * (1.0 - snowP);
+        col = mix(col, ice, frozen); foam *= 1.0 - frozen;
+      }
       float f = smoothstep(fogNear, fogFar, dist);
       col = mix(col, fogColor, f);
       float sunAmt = pow(max(dot(-v, hazeSun), 0.0), 5.0);
       col = mix(col, hazeCol, clamp(f * sunAmt * hazeK * 0.8 + smoothstep(600.0, 3000.0, dist) * 0.12 * hazeK, 0.0, 0.7));
       float a = mix(0.7, 0.98, fres);
-      gl_FragColor = vec4(col, max(max(max(a, f), min(spec, 1.0)), foam));
+      gl_FragColor = vec4(col, mix(max(max(max(a, f), min(spec, 1.0)), foam), 1.0, frozen));
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`,
@@ -1351,7 +1363,9 @@ function updateWeather(dt) {
 const SPRAY = [1.55, 1.6, 1.65];
 const sm = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 // low-lying cloud layers: patches along ~25% of the distance, 10-55 m above ground/water
-const lowCloudK = (z) => sm(0.56, 0.72, world.noise(z * 0.00009, 3.3)) * (TEST && params.has('clouds') ? 0 : 1) + (params.has('clouds') ? 1 : 0);
+const CLOUDC = new Map();
+function cloudStretch(cp) { let c = CLOUDC.get(cp); if (c === undefined) { const r = makeRng(((S.seed || 1) ^ (cp * 2654435761)) >>> 0); const st = cp * 200000 + 5000 + r() * 185000; c = [st, st + 10000]; CLOUDC.set(cp, c); if (CLOUDC.size > 64) CLOUDC.delete(CLOUDC.keys().next().value); } return c; }
+const lowCloudK = (z) => { if (params.has('clouds')) return 1; const d = -z, c = cloudStretch(Math.floor(d / 200000)); return sm(c[0] - 800, c[0] + 800, d) * (1 - sm(c[1] - 800, c[1] + 800, d)); }; // ~10 km cloud stretch every 200 km
 const cloudDens = (x, z) => { const k = Math.min(lowCloudK(z), 1); return k <= 0 ? 0 : k * sm(0.38, 0.66, world.noise(x * 0.0035 + 9.1, z * 0.003)); };
 const CLOUD_COL = [1.45, 1.43, 1.4];
 const dcol = (x, z) => (world.gridHeight(x, z) < 0 ? SPRAY : E.dust);
@@ -2347,6 +2361,12 @@ function enterIceAge(on) {
   if (on && S.wx) { // the climate turns: upcoming weather becomes ice storms & blizzards, and one hits soon
     let flip = false;
     for (const e of S.wx.events) { if (e.type === 'snow') continue; e.type = (flip = !flip) ? 'hail' : 'thunder'; e.ice = true; }
+    const r = makeRng(((S.seed || 1) ^ 0x1ce1ce) >>> 0), ev = S.wx.events;
+    for (let cp = Math.ceil(S.dist / 100000) * 100000; cp < S.dist + 3e6; cp += 100000) {
+      if (r() < 0.1) { const a = cp + r() * 40000; if (!ev.some((e) => a < e.end && a + 50000 > e.start)) ev.push({ start: a, end: a + 50000, type: 'snow', warned: false, entered: false, ice: true, heavy: true }); } // heavy snow: 50 km corridor
+      if (r() < 0.1) { const a = cp + r() * 85000; if (!ev.some((e) => a < e.end && a + 10000 > e.start)) ev.push({ start: a, end: a + 10000, type: 'thunder', warned: false, entered: false, ice: true }); } // ice thunderstorm ~10 km
+    }
+    ev.sort((a, b) => a.start - b.start);
     const st = S.dist + 3000; if (!S.wx.events.some((e) => e.start < st + 6000)) S.wx.events.unshift({ start: st, end: st + 3500, type: 'hail', warned: false, entered: false, ice: true });
   }
 }
@@ -2477,9 +2497,12 @@ function updateHazards(dt) {
   if (S.mode !== 'playing') return;
   const d = S.dist;
   // falling rocks: ~every 3-6 km, dropped from the canyon rim onto your line ~2-3 s ahead
-  if (!RX.nextRock) RX.nextRock = d + (params.has('rocks') ? 600 : 2500 + Math.random() * 2500);
+  if (!RX.nextRock) RX.nextRock = d + (params.has('rocks') ? 600 : 1000);
   if (d > RX.nextRock && !RX.above) {
-    RX.nextRock = d + (params.has('rocks') ? 900 : 3000 + Math.random() * 3000);
+    const cp = Math.floor(d / 40000), rr = makeRng(((S.seed || 1) ^ (cp * 0x9E3779B1)) >>> 0), on = rr() < 0.1, st = cp * 40000 + rr() * 34000;
+    const inStretch = params.has('rocks') || (on && d > st && d < st + 5000);
+    RX.nextRock = d + (params.has('rocks') ? 900 : inStretch ? 700 + Math.random() * 600 : 1000);
+    if (inStretch) {
     const ahead = clamp(S.speed * 2.4, 700, (AHEAD - 2) * CHUNK_L), zd = d + ahead, z = -zd;
     if (ROCK_BIOMES[world.biomeMain(z)] && world.gridHeight0(world.pathX(z), z) > 0) {
       const ch = chunks.get(Math.floor(zd / CHUNK_L));
@@ -2491,6 +2514,7 @@ function updateHazards(dt) {
         ch.objs.push(o); RX.rocks.push(o); RX.instDirty = true;
         pop('⚠ FALLING ROCK AHEAD', 'close'); rxSay('Rock fall ahead.', 'rock'); audio.warn();
       }
+    }
     }
   }
   for (let i = RX.rocks.length - 1; i >= 0; i--) {
@@ -2633,7 +2657,7 @@ function rxUpdate(dt, rdt) { // dt = game (possibly slow-mo) time, rdt = real ti
   RX.jolt = RX.joltT > 0 ? RX.joltDir * 0.6 * Math.min(RX.joltT / 0.7, 1) * (S.autopilot || rxForceAP() ? 0.2 : 1) + Math.sin(S.t * 60) * 0.15 * RX.joltT : 0;
   RX.gsupCool = Math.max(0, RX.gsupCool - dt);
   if (RX.fzBonus > 0) { RX.fzBonus = Math.max(0, RX.fzBonus - rdt); const el = $('fzBonus'); el.classList.toggle('hidden', !(RX.fzBonus > 0)); el.textContent = '❄ FREEZE BONUS ' + RX.fzBonus.toFixed(1) + ' s'; } // real time: slow-mo does not extend it
-  updateBase();
+  updateBase(); updateBirdsFossils(dt);
   updateHazards(dt); updateWingmen(dt); updateEscorts(dt); updateFreeze(dt); updateBlast(dt); updateHostiles(dt); updateG(dt);
   if (RX.instDirty) { RX.instDirty = false; rebuildInstances(); }
   RX.hudT -= rdt;
@@ -3127,6 +3151,36 @@ function spawnIcehawk(A) {
   const e = { jet: true, type: 'jet', icehawk: true, zone: A, mesh: icehawkMesh, hp: 3, dead: false, r: 11, h: 9, col: [1, 1, 1], p: new THREE.Vector3().copy(S.pos).addScaledVector(_rf, 1500), v: new THREE.Vector3(), ahead: 600, lat: 0, up: 40, ph: 0, fireT: 3, roll: 0, x: 0, y: 0, z: 0 };
   e.p.y = S.pos.y + 90; icehawkMesh.visible = true; RX.enemies.push(e);
   pop('❄ WHITE RAIDER ICEHAWK · 3 HITS TO DOWN', 'close'); rxSay('Warning. White raider Icehawk.', 'ih0');
+}
+
+// ---------- v36: birds (shown below ~1,200 km/h) + Ice Age fossils ----------
+const birdGeo = (() => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, -0.3, -1.1, 0.25, 0.25, 0, 0, 0.35, 0, 0, -0.3, 0, 0, 0.35, 1.1, 0.25, 0.25], 3)); g.computeVertexNormals(); return g; })();
+const birds = new THREE.InstancedMesh(birdGeo, new THREE.MeshStandardMaterial({ color: 0x1c1a18, roughness: 0.9, side: THREE.DoubleSide }), 60); birds.count = 0; birds.frustumCulled = false; scene.add(birds);
+const BIRDS = { flocks: [], next: 0 };
+const fossilGeo = new THREE.TorusGeometry(3.2, 0.28, 6, 14, Math.PI);
+const fossils = new THREE.InstancedMesh(fossilGeo, new THREE.MeshStandardMaterial({ color: 0xd9d2c3, roughness: 0.85 }), 400); fossils.count = 0; fossils.frustumCulled = false; scene.add(fossils);
+function updateBirdsFossils(dt) {
+  if (S.dist < (BIRDS.last || 0) - 50) { BIRDS.next = 0; BIRDS.flocks.length = 0; CLOUDC.clear(); } BIRDS.last = S.dist; // new run
+  const kmh = S.speed * 3.6; birds.count = 0;
+  if (S.mode !== 'crashed' && !RX.blast) {
+    if (S.dist > BIRDS.next && kmh < 1200 && !RX.ice) { BIRDS.next = S.dist + 1500 + Math.random() * 2500; headingFrame(S.heading); const c = S.pos.clone().addScaledVector(_rf, 500 + Math.random() * 500).addScaledVector(_rr, (Math.random() - 0.5) * 200); c.y = world.surface(c.x, c.z) + 25 + Math.random() * 40; BIRDS.flocks.push({ c, h: Math.random() * 6.28, n: 12 + (Math.random() * 18 | 0), t: 0 }); if (BIRDS.flocks.length > 3) BIRDS.flocks.shift(); }
+    if (kmh < 1200) for (const f of BIRDS.flocks) { // ~70 km/h flock
+      f.t += dt; f.h += Math.sin(f.t * 0.3) * 0.2 * dt; f.c.x += -Math.sin(f.h) * 19.4 * dt; f.c.z += -Math.cos(f.h) * 19.4 * dt;
+      for (let i = 0; i < f.n && birds.count < 60; i++) { const a = i * 2.39996, r = 3 + Math.sqrt(i) * 3.5, fl = Math.sin(f.t * 9 + i) * 0.8;
+        _bp.set(f.c.x + Math.cos(a) * r, f.c.y + Math.sin(i * 1.7) * 3, f.c.z + Math.sin(a) * r); _be.set(0, f.h, 0); _bq.setFromEuler(_be); _bs.set(1.4, 1.4 * (0.4 + 0.6 * Math.abs(fl)) * Math.sign(fl || 1), 1.4); _bm.compose(_bp, _bq, _bs); birds.setMatrixAt(birds.count++, _bm); }
+    }
+  }
+  birds.instanceMatrix.needsUpdate = true;
+  fossils.count = 0;
+  if (RX.iceK > 0.5) { // fossils (not living creatures): each 100 km checkpoint has a 5% chance of a fossil field
+    for (let cp = Math.floor((S.dist - 1000) / 100000); cp <= Math.floor((S.dist + 6000) / 100000); cp++) {
+      const r = makeRng(((S.seed || 1) ^ (cp * 0x51ed27)) >>> 0); if (!(r() < 0.05) && !params.has('fossils')) continue;
+      const st = params.has('fossils') ? 300 : cp * 100000 + r() * 90000;
+      for (let k = 0; k < 8; k++) { const d = st + k * 600 + r() * 300; if (d < S.dist - 800 || d > S.dist + 6000) continue; const z = -d, x = world.pathX(z) + (r() - 0.5) * 220, y = world.surface(x, z), ry = r() * 6.28;
+        for (let rib = 0; rib < 11; rib++) { const off = (rib - 5) * 1.6, sc = 1 - Math.abs(rib - 5) * 0.07; _bp.set(x + Math.sin(ry) * off, y - 0.6, z + Math.cos(ry) * off); _be.set(0, ry + Math.PI / 2, 0); _bq.setFromEuler(_be); _bs.set(sc, sc, sc); _bm.compose(_bp, _bq, _bs); if (fossils.count < 400) fossils.setMatrixAt(fossils.count++, _bm); } }
+    }
+  }
+  fossils.instanceMatrix.needsUpdate = true;
 }
 // ---------- v34: TRANSFORM · Blackhawk <-> armored ground vehicle ----------
 let carRig = null;
