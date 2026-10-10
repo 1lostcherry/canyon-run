@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=49';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=49';
-import { loadAssets } from './assets.js?v=49';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=50';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=50';
+import { loadAssets } from './assets.js?v=50';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=49';
-import { GpuDust } from './gpudust.js?v=49';
-import { PostFX } from './postfx.js?v=49';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=49';
-import { GameAudio } from './audio.js?v=49';
-import { Controls } from './input.js?v=49';
+import { Grass } from './grass.js?v=50';
+import { GpuDust } from './gpudust.js?v=50';
+import { PostFX } from './postfx.js?v=50';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=50';
+import { GameAudio } from './audio.js?v=50';
+import { Controls } from './input.js?v=50';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -855,7 +855,23 @@ function safeAssist(steer, pitchIn, dt) {
   const k = S.assist;
   return { steer: lerp(steer, S.safeEs ?? steer, k), pitch: lerp(pitchIn, S.safeEp ?? pitchIn, k) };
 }
-function inSafeBand() { return !RX.above && S.agl >= SAFE_AGL && S.mode === 'playing'; }
+function holdTargetY(T, sp, dx, dz, px = S.pos.x, pz = S.pos.z) {
+  const fl = Math.max(world.height0(world.pathX(pz), pz), 0); const now = S.t || 0, fdt = clamp(now - (S.floorT ?? now), 0, 0.5); S.floorT = now; S.floorRef = S.floorRef === undefined || Math.abs(S.floorRef - fl) > 2000 ? fl : S.floorRef + (fl - S.floorRef) * (1 - Math.exp(-fdt * 0.25)); // very slow, smooth
+  let gA = world.surface(px, pz); for (const t of [0.1, 0.25, 0.5, 0.8, 1.2, 1.8, 2.5]) { const d = Math.min(sp * t, 5000); gA = Math.max(gA, world.surface(px + dx * d, pz + dz * d) - t * 6); } // early, gentle climbs over what's ahead
+  if (controls.terrainFollow || T >= SAFE_AGL - 5) { S.tfOn = !(T >= SAFE_AGL - 5) || !!controls.terrainFollow; let g2 = -1e9; for (const t of [0.035, 0.07, 0.12]) { const d = Math.max(sp * t, 25); g2 = Math.max(g2, world.surface(px + dx * d, pz + dz * d)); } return g2 + T; }
+  let y = S.floorRef + T; const clr = Math.min(25, T + 4);
+  if (gA + clr > y) { y = gA + clr; S.tfOn = true; } // only to avoid the ground
+  const gU = world.surface(px, pz); if (y > gU + MAX_AGL - 4) y = gU + MAX_AGL - 4; // 500 m cap, approached smoothly
+  return y;
+}
+function dbgUpdate() { if (!RX.debug) return; const c = controls, el = $('dbg'); if ((RX.dbgT = (RX.dbgT || 0) + 1) % 8) return; const f = (v, n = 2) => (v === undefined || v === null ? '-' : (+v).toFixed(n));
+  const dv = c.drags ? [...c.drags.values()].map((q) => q.kind).join(',') : '';
+  el.textContent = ['STEER cmd ' + f(S.steerIn) + '  smoothed ' + f(S.steerS) + '  src ' + S.cmdSrc, 'input: swipe ' + f(c.swS && c.swS[0]) + ' tilt ' + f(c.tiltSteer) + ' (' + (c.tiltOn ? 'ON' : 'off') + (c.hasTilt ? ', sensor live' : ', no sensor') + ') keys ' + f(c._kx) + ' touch ' + f(c.touchSteer),
+    'drags [' + dv + ']  fingerT ' + f(c.fingerT, 0) + '  altTarget ' + f(c.altTarget, 0) + ' m  fingerH ' + (c.fingerHeight ? 'on' : 'off'),
+    'PITCH cmd ' + f(S.pitchIn) + '  pitch ' + f(S.pitch, 3) + '  vy ' + f(S.vel && S.vel.y, 0) + '  vyT ' + f(S.vyT, 0) + '  hold ' + (S.holdDirect ? 'direct' : 'assist/AP') + '  ' + (S.tfOn ? 'TERRAIN FOLLOW' : 'level hold'),
+    'AGL ' + f(S.agl, 0) + '  floorRef ' + f(S.floorRef, 0) + '  heading ' + f(S.heading, 4) + '  roll ' + f(S.roll, 3),
+    'AP ' + (S.autopilot ? 'ON' : 'off') + '  SAFE ' + (safeMode ? 'ON' : 'off') + '  SMART ' + (RX.smart ? 'ON' : 'off') + '  FORCES ' + (RX.forces ? 'ON' : 'off') + ' jolt ' + f(RX.jolt) + '  AI ' + (RX.scanner ? 'ON' : 'off') + '  assist ' + f(S.assistT)].join('\n'); }
+function inSafeBand() { return !RX.above && S.agl >= SAFE_AGL && S.mode === 'playing' && !RX.inCave; } // no SAFE band under the cavern: stalactites hang into it
 function altHoldInput() { // PD hold toward the slider's terrain-relative target
   const T = controls.altTarget ?? 30, vy = S.vel ? S.vel.y : 0;
   return clamp((T - S.agl) / 45 - vy / 70, -1, 1);
@@ -955,6 +971,8 @@ function updateFlight(dt) {
   if (RX.forces && S.hp && S.mode === 'playing') steer += ((100 - S.hp.R) - (100 - S.hp.L)) * 0.0012; // REALISTIC FORCES only: subtle damage pull
   if (RX.forces) steer += RX.jolt * 0.5; // turbulence / lightning jolts only with REALISTIC FORCES
   S.steerIn = steer; S.pitchIn = pitchIn;
+  S.cmdSrc = (S.autopilot || rxForceAP()) ? 'AUTOPILOT' : (S.assistT > 0 ? 'SAFE/SMART ASSIST' : (Math.abs(controls.steer) > 0.001 ? 'PLAYER' : 'NONE')) + (RX.forces && Math.abs(RX.jolt) > 0.001 ? ' + FORCES' : '');
+  { const tf = $('tfInd'); if (tf) { const on = !!S.tfOn && S.mode === 'playing' && !S.autopilot; if (tf._on !== on) { tf._on = on; tf.classList.toggle('hidden', !on); } } }
   S.assistT = Math.max(0, (S.assistT || 0) - dt); { const ai = $('assistInd'); if (ai) { const on = S.assistT > 0 && S.mode === 'playing' && !S.autopilot; if (ai._on !== on) { ai._on = on; ai.classList.toggle('hidden', !on); } } }
   S.steerS = damp(S.steerS, steer, 9, dt);
   // speed
@@ -972,25 +990,27 @@ function updateFlight(dt) {
   if (Math.abs(S.heading) > HMAX) S.heading = Math.sign(S.heading) * HMAX;
   // pitch
   let ptarget = pitchIn * 0.30, prate = 5, vmax = 130;
-  if (S.holdDirect) { // v47 predictive terrain-envelope hold: aim at (ground + target) a short time ahead; most demanding sample wins
+  S.tfOn = false;
+  if (S.holdDirect) { // v50: altitude target = smoothed route floor + target (passive); terrain-follow only to avoid ground (or always when TERRAIN FOLLOW is on)
     const sp = Math.max(S.speed, 20), T = controls.altTarget ?? 30, dx = -Math.sin(S.heading), dz = -Math.cos(S.heading);
-    vmax = clamp(90 + sp * 0.6, 90, 9000); let vyT = -1e9;
-    for (const tau of [0.035, 0.07, 0.12]) { const d = Math.max(sp * tau, 25 + tau * 60); const tt = d / sp; vyT = Math.max(vyT, (world.surface(S.pos.x + dx * d, S.pos.z + dz * d) + T - S.pos.y) / Math.max(tt, 0.04)); }
-    vyT = clamp(vyT, -vmax, vmax); S.vyT = vyT;
-    ptarget = Math.asin(clamp(vyT / sp, -0.8, 0.8)); prate = sp > 2000 ? 45 : 14; }
+    vmax = clamp(90 + sp * 0.6, 90, 9000); const FOL = controls.terrainFollow || T >= SAFE_AGL - 5;
+    const yT = holdTargetY(T, sp, dx, dz);
+    let vyT = clamp((yT - S.pos.y) * (FOL ? 6 : 1.2), -vmax, vmax); S.vyT = vyT;
+    if (!FOL) { const aM = (S.agl < 60 || vyT > S.vel.y + 200 ? 220 : 30) + sp * 0.02; S.vyCmd = (S.vyCmd ?? S.vel.y) + clamp(vyT - (S.vyCmd ?? S.vel.y), -aM * dt, aM * dt); vyT = S.vyCmd; } else S.vyCmd = S.vel.y; // vertical accel limit: smooth level hold
+    ptarget = Math.asin(clamp(vyT / sp, -0.6, 0.6)); prate = FOL ? (sp > 2000 ? 45 : 10) : 30; }
   S.pitch = damp(S.pitch, ptarget, prate, dt);
   _fwd.set(-Math.sin(S.heading) * Math.cos(S.pitch), Math.sin(S.pitch), -Math.cos(S.heading) * Math.cos(S.pitch));
   S.vel.copy(_fwd).multiplyScalar(S.speed);
   if (Math.abs(S.vel.y) > vmax) S.vel.y = Math.sign(S.vel.y) * vmax;
   (S.prevPos || (S.prevPos = new THREE.Vector3())).copy(S.pos);
-  if (S.holdDirect && S.speed > 2500 && !RX.blast) { // v49 high-speed terrain envelope: sub-stepped vertical tracking along the frame's path (1 frame = 150+ m)
+  if (S.holdDirect && (controls.terrainFollow || (controls.altTarget ?? 30) >= SAFE_AGL - 5) && S.speed > 2500 && !RX.blast) { // v49 high-speed terrain envelope: sub-stepped vertical tracking along the frame's path (1 frame = 150+ m)
     const T = controls.altTarget ?? 30, n = Math.min(24, Math.ceil(S.speed * dt / 40)), sdt = dt / n, vm = vmax, y0 = S.pos.y; let y = y0;
     const hx = S.vel.x * sdt, hz = S.vel.z * sdt; let px = S.pos.x, pz = S.pos.z;
-    for (let i = 0; i < n; i++) { px += hx; pz += hz; const gE = Math.max(world.surface(px, pz), world.surface(px + hx * 2, pz + hz * 2) - 15); y += clamp(gE + T - y, -vm * sdt, vm * sdt); }
+    for (let i = 0; i < n; i++) { px += hx; pz += hz; const yT = true ? Math.max(world.surface(px, pz), world.surface(px + hx * 2, pz + hz * 2) - 15) + T : holdTargetY(T, S.speed, hx / Math.hypot(hx, hz), hz / Math.hypot(hx, hz), px, pz); y += clamp(yT - y, -vm * sdt * (controls.terrainFollow ? 1 : 0.15), vm * sdt * (controls.terrainFollow ? 1 : 0.6)); }
     S.pos.x = px; S.pos.z = pz; S.pos.y = y; S.vel.y = (y - y0) / dt; S.pitch = damp(S.pitch, Math.asin(clamp(S.vel.y / S.speed, -0.5, 0.5)), 10, dt);
   } else S.pos.addScaledVector(S.vel, dt);
   geyserForces(dt);
-  { const gC = world.surface(S.pos.x, S.pos.z); if (!RX.above && S.pos.y > gC + MAX_AGL) { S.pos.y = gC + MAX_AGL; S.pitch = Math.min(S.pitch, 0); } } // hard cap: 500 m above the ground
+  { const gC = world.surface(S.pos.x, S.pos.z); if (!RX.above && S.pos.y > gC + MAX_AGL) { const ov = S.pos.y - gC - MAX_AGL; S.pos.y -= ov > 80 ? ov - 80 : Math.min(ov, ov * dt * 2 + 0.5); S.pitch = Math.min(S.pitch, 0.02); } } // hard cap: 500 m above the ground
   rxLayer();
   const ground = world.surface(S.pos.x, S.pos.z);
   S.agl = S.pos.y - ground;
@@ -1059,6 +1079,7 @@ function resolveCollisions(dt) {
     if (o.dead) continue; const dx = o.x - S.pos.x, dz = o.z - S.pos.z, R = targetRadius(o) + 10;
     if (dx * dx + dz * dz < R * R && S.pos.y < (o.y || 0) + (o.h || o.r * 2) + 8) { _v.set(o.x, S.pos.y, o.z); destroyTarget(o, _v); S.superCuts = (S.superCuts || 0) + 1; }
   }
+  if (S.mode === 'playing' && stalCheck()) return true;
   if (RX.god && S.mode === 'playing') return godPlow(dt);
   if (S.land) return false;
   if (rxSlabCheck()) return true;
@@ -1373,6 +1394,8 @@ function updateWeather(dt) {
   scene.fog.color.copy(FOG_BASE).lerp(_wc, k);
   if (wx.rain || wx.hail) scene.fog.color.lerp(_sg.setRGB(0.24, 0.29, 0.37, LIN), k * 0.9);
   if (wx.snow) scene.fog.color.lerp(_sg.setRGB(0.62, 0.68, 0.76, LIN), k * 0.95);
+  { const zc = zoneAt(S.dist); RX.inCave = !!(zc && !RX.above && S.pos.y < zc.b); RX.caveK = damp(RX.caveK || 0, RX.inCave ? 1 : 0, 1.5, dt);
+    if (RX.caveK > 0.01) { const c = RX.ice ? _sg.setRGB(0.5, 0.6, 0.72, LIN) : _sg.setRGB(0.62, 0.34, 0.15, LIN); scene.fog.color.lerp(c, RX.caveK * 0.75); scene.fog.near = lerp(scene.fog.near, 60, RX.caveK); scene.fog.far = lerp(scene.fog.far, Math.min(scene.fog.far, 2200), RX.caveK); } }
   scene.fog.color.r += fl * 0.35; scene.fog.color.g += fl * 0.38; scene.fog.color.b += fl * 0.5;
   scene.background.copy(scene.fog.color);
   fogU.fogColor.value.copy(scene.fog.color); fogU.fogNear.value = scene.fog.near; fogU.fogFar.value = scene.fog.far;
@@ -1645,7 +1668,7 @@ function updateHUD(dt) {
     const safe = inSafeBand(); A.bar.classList.toggle('safe', safe);
     const txt = safe ? 'SAFE' : Math.round(T) + ' m';
     if (A.pct.textContent !== txt) A.pct.textContent = txt;
-    const sb = $('safeAlt'); if (sb) sb.classList.toggle('hidden', !safe);
+    const sb = $('safeAlt'); if (sb) { const cav = RX.inCave && S.agl >= SAFE_AGL - 30 && S.mode === 'playing'; sb.classList.toggle('hidden', !safe && !cav); const tx = cav ? 'CAVERN · NO SAFE BAND' : 'SAFE ALTITUDE'; if (sb.textContent !== tx) sb.textContent = tx; }
   }
   hud.comboBar.style.transform = 'scaleX(' + (S.combo > 0 ? S.comboT / COMBO_TIME : 0).toFixed(3) + ')';
   hudT -= dt; if (hudT > 0) return; hudT = 1 / 15;
@@ -2070,7 +2093,8 @@ function buildDeck(zn) {
         const col = ICEDK ? [0.7 + 0.1 * n, 0.78 + 0.1 * n, 0.88 + 0.06 * m] : [0.13 + 0.09 * n + 0.04 * m, 0.2 + 0.1 * n, 0.07 + 0.04 * m];
         quad([xa, t, z0], [xb, t, z0], [xb, t, z1], [xa, t, z1], [0, 1, 0], col);
       }
-      quad([x0, b, z1], [x1, b, z1], [x1, b, z0], [x0, b, z0], [0, -1, 0], botC);
+      for (let i = 0; i < NX; i++) { const xa = x0 + i * dx, xb = xa + dx, n = world.noise(xa * 0.006 + 9.1, d * 0.006), st = 0.5 + 0.5 * Math.sin(d * 0.03 + n * 4);
+        const cc = ICEDK ? [0.5 + 0.1 * n, 0.6 + 0.1 * n, 0.72 + 0.08 * st] : [0.36 + 0.12 * st + 0.06 * n, 0.19 + 0.07 * st, 0.09 + 0.04 * n]; quad([xa, b, z1], [xb, b, z1], [xb, b, z0], [xa, b, z0], [0, -1, 0], cc); }
     }
     // faces at the ends of each solid span (hole edges / zone ends)
     for (const [d, sg] of [[d0, 1], [d1, -1]]) {
@@ -2084,11 +2108,72 @@ function buildDeck(zn) {
   const m = new THREE.Mesh(g, terrainMat); m.receiveShadow = true; m.castShadow = false; m.frustumCulled = false;
   scene.add(m); zn.mesh = m;
 }
+// ---------- v50: CAVERN — hanging sandstone stalactites under the sky deck, pillars + jungle below ----------
+const STAL = (() => {
+  const mk = (seed, sides, rings, jag) => { // unit stalactite: top at y=0, tip at y=-1, radius 1 at the top; layered faceted strata
+    const r = makeRng(seed), P = [], C = [], I = [];
+    for (let j = 0; j <= rings; j++) { const u = j / rings, y = -u, base = Math.pow(1 - u, 0.9) * (j === rings ? 0 : 1);
+      const ledge = (j % 2 ? 1 + jag * (0.4 + r() * 0.6) : 1 - jag * 0.3 * r()); const tw = r() * 0.6;
+      const band = (j % 3 === 0 ? 0.62 : 0.9) + 0.32 * r(); // strata band brightness (layered sandstone)
+      for (let i = 0; i < sides; i++) { const a = (i / sides) * 6.2832 + tw + j * 0.3, rr = base * ledge * (0.85 + r() * 0.3);
+        P.push(Math.cos(a) * rr, y, Math.sin(a) * rr); C.push(band, band * (0.92 + r() * 0.08), band * (0.9 + r() * 0.1)); } }
+    for (let j = 0; j < rings; j++) for (let i = 0; i < sides; i++) { const a = j * sides + i, b = j * sides + (i + 1) % sides, c = a + sides, d = b + sides; I.push(a, c, b, b, c, d); }
+    let g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3)); g.setIndex(I);
+    g = g.toNonIndexed(); g.computeVertexNormals(); return g; // flat facets
+  };
+  const geos = [mk(11, 8, 14, 0.18), mk(29, 7, 11, 0.28), mk(47, 9, 18, 0.12)], lo = [mk(5, 5, 5, 0.15)];
+  const sand = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9, metalness: 0, color: 0xe0955a, emissive: 0x3a1a08 });
+  const ice = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.15, metalness: 0.1, color: 0xa8d8ff, emissive: 0x0a2030, transparent: true, opacity: 0.88 });
+  patchRockMaterial && false;
+  return { geos, lo, sand, ice };
+})();
+function stalGen(zn) { // deterministic hanging spires for one deck zone; dead flags persist on the zone object
+  if (zn.stal) return zn.stal; const r = makeRng(((zn.start | 0) ^ 0x51ed27) >>> 0), L = [];
+  for (let d = zn.start + 60; d < zn.end - 60; d += 12 + r() * 14) {
+    const z = -d, cx = world.pathX(z), n = 3 + ((r() * 4) | 0);
+    for (let k = 0; k < n; k++) { const off = (r() * 2 - 1) * DECK_HALF * 0.95; if (Math.abs(off) < 220 && r() < 0.82) continue; // keep the corridor flyable but not empty
+      const x = cx + off, floor = Math.max(world.gridHeight0(x, z), 0), head = zn.b - floor; if (head < 120) continue;
+      const big = r(); const len = Math.min(head - 40, big < 0.55 ? 40 + r() * 140 : big < 0.9 ? 160 + r() * 180 : 300 + r() * 160), rad = clamp(len * (0.07 + r() * 0.07), 5, 46);
+      L.push({ x, z, d, r: rad, L: len, v: (r() * 3) | 0, rot: r() * 6.28, dead: false }); } }
+  zn.stal = L; return L;
+}
+function buildStal(zn) {
+  const L = stalGen(zn), ice = RX.ice, grp = new THREE.Group(), BLK = 1000;
+  for (let b0 = zn.start; b0 < zn.end; b0 += BLK) { const sub = L.filter((q) => q.d >= b0 && q.d < b0 + BLK && !q.dead); if (!sub.length) continue;
+    for (let v = 0; v < 3; v++) { const vs = sub.filter((q) => q.v === v); if (!vs.length) continue;
+      const m = new THREE.InstancedMesh(STAL.geos[v], ice ? STAL.ice : STAL.sand, vs.length); m.castShadow = false; m.receiveShadow = true;
+      vs.forEach((q, i) => { _bp.set(q.x, zn.b + 6, q.z); _be.set(0, q.rot, 0); _bq.setFromEuler(_be); _bs.set(q.r * (ice ? 0.6 : 1), q.L + 6, q.r * (ice ? 0.6 : 1)); _bm.compose(_bp, _bq, _bs); m.setMatrixAt(i, _bm);
+        const t = ice ? 1 : 0.8 + ((q.rot * 7) % 1) * 0.4; m.setColorAt(i, _sg.setRGB(t, t * (ice ? 1 : 0.93), t * (ice ? 1 : 0.85))); q.im = m; q.ii = i; });
+      m.computeBoundingSphere(); grp.add(m); } }
+  zn.stalIce = ice; scene.add(grp); zn.stalG = grp;
+}
+function stalBreak(q, zn, y) { q.dead = true; if (q.im) { q.im.setMatrixAt(q.ii, _bm.makeScale(0, 0, 0)); q.im.instanceMatrix.needsUpdate = true; }
+  _v.set(q.x, y, q.z); airburst(_v.clone()); for (let i = 0; i < 40; i++) dust.spawn(q.x + (Math.random() - 0.5) * q.r * 2, y + (Math.random() - 0.5) * 30, q.z + (Math.random() - 0.5) * q.r * 2, (Math.random() - 0.5) * 40, -20 - Math.random() * 40, (Math.random() - 0.5) * 40, 2 + Math.random() * 2, 4, 18, 0.6, ...(RX.ice ? [0.8, 0.9, 1.0] : [0.62, 0.36, 0.18]), 1, 0.5);
+  S.stalKills = (S.stalKills || 0) + 1; S.shake = Math.max(S.shake, 0.5); audio.explode && audio.explode(); }
+function stalCheck() { // hanging spires are solid: crash unless GOD / PHASE / SUPERSAFE / GHOST (then they shatter); autopilot also shatters them (it can't see them)
+  const zn = zoneAt(S.dist); if (!zn || !zn.stal || RX.above || S.pos.y > zn.b) return false;
+  const L = zn.stal, d0 = Math.min(S.dist, -S.prevPos.z) - 60, d1 = Math.max(S.dist, -S.prevPos.z) + 60; let lo = 0, hi = L.length; while (lo < hi) { const m = (lo + hi) >> 1; if (L[m].d < d0) lo = m + 1; else hi = m; }
+  const ax = S.prevPos.x, az = S.prevPos.z, bx = S.pos.x - ax, bz = S.pos.z - az, bb = bx * bx + bz * bz || 1;
+  for (let i = lo; i < L.length && L[i].d <= d1; i++) { const q = L[i]; if (q.dead) continue;
+    const t = clamp(((q.x - ax) * bx + (q.z - az) * bz) / bb, 0, 1), px = ax + bx * t, pz = az + bz * t, py = S.prevPos.y + (S.pos.y - S.prevPos.y) * t;
+    const u = (zn.b + 6 - py) / (q.L + 6); if (u < 0 || u > 1) continue; const rad = q.r * (RX.ice ? 0.6 : 1) * Math.pow(1 - u, 0.9) * 1.05 + 2.5;
+    const dx = q.x - px, dz = q.z - pz; if (dx * dx + dz * dz > rad * rad) continue;
+    if (RX.god || RX.super || RX.ghost || RX.phase > 0 || S.autopilot || rxForceAP()) { stalBreak(q, zn, py); continue; }
+    S.crashCause = 'STALACTITE'; return true; }
+  return false;
+}
 function rxDeckObjs(idx, objs) { // trees & rocks on the deck top are real obstacles (collisions, autopilot, missiles)
   for (const zn of RX.zones) {
     const d0 = idx * CHUNK_L, d1 = d0 + CHUNK_L;
     if (zn.start > d1) break; if (zn.end < d0 || !zoneReady(zn)) continue;
     const rng = makeRng((idx * 7919 + 13) >>> 0);
+    for (let k = 0; k < 26; k++) { // v50 cavern floor: standing sandstone pillars + rounded jungle trees + boulders
+      const d = d0 + rng() * CHUNK_L, z = -d, side = rng() < 0.5 ? -1 : 1, x = world.pathX(z) + side * (60 + rng() * 900), ty = rng(); if (d < zn.start || d > zn.end) continue;
+      const gy = world.gridHeight(x, z); if (gy < 0.5) continue;
+      if (ty < 0.35) objs.push({ type: 'spire', x, y: gy - 4, z, r: 5 + rng() * 9, h: 40 + rng() * 140, valley: false, rot: rng() * 6.28, variant: (rng() * 4) | 0, col: [0.95, 0.55, 0.3], near: false, done: false });
+      else if (ty < 0.85) { const r = 4 + rng() * 4; objs.push({ type: 'tree', x, y: gy - 0.5, z, r, h: r * (3 + rng() * 2), valley: false, rot: rng() * 6.28, variant: (rng() * 4) | 0, col: [0.55 + rng() * 0.3, 0.85 + rng() * 0.3, 0.45 + rng() * 0.2], near: false, done: false }); }
+      else { const r = 3 + rng() * 5; objs.push({ type: 'boulder', x, y: gy - r * 0.35, z, r, h: 0, valley: false, rot: rng() * 6.28, variant: (rng() * 4) | 0, col: [0.95, 0.6, 0.38], near: false, done: false }); }
+    }
     for (let k = 0; k < 16; k++) {
       const d = d0 + rng() * CHUNK_L; if (d < zn.start || d > zn.end || inHole(zn, d)) { rng(); rng(); continue; }
       const z = -d, side = rng() < 0.5 ? -1 : 1, x = world.pathX(z) + side * (170 + rng() * 820);
@@ -2101,11 +2186,13 @@ function rxUpdateZones() {
   const d = S.dist; RX.nearZones.length = 0;
   for (const zn of RX.zones) {
     if (zn.start > d + 14000) break;
-    if (zn.end < d - 1500) { if (zn.mesh) { scene.remove(zn.mesh); zn.mesh.geometry.dispose(); zn.mesh = null; } continue; }
+    if (zn.end < d - 1500) { if (zn.mesh) { scene.remove(zn.mesh); zn.mesh.geometry.dispose(); zn.mesh = null; } if (zn.stalG) { scene.remove(zn.stalG); zn.stalG = null; } continue; }
     if (!zoneReady(zn)) continue;
     RX.nearZones.push(zn);
     if (zn.mesh && zn.iceBuilt !== RX.ice) { scene.remove(zn.mesh); zn.mesh.geometry.dispose(); zn.mesh = null; }
     if (!zn.mesh && zn.start < d + 9000) buildDeck(zn);
+    if (zn.stalG && zn.stalIce !== RX.ice) { scene.remove(zn.stalG); zn.stalG = null; }
+    if (!zn.stalG && zn.start < d + 9000) buildStal(zn);
   }
 }
 // layer logic for the real ship (called every sub-step after moving)
@@ -2808,6 +2895,8 @@ function rxMenuSync() {
   set('mxUltra', RX.ultra ? 'ULTRA · 124,700 ON' : 'ULTRA · OFF', RX.ultra);
   set('mxGhost', RX.ghost ? 'GHOST · ON' : 'GHOST · OFF', RX.ghost);
   set('mxForces', RX.forces ? 'REALISTIC FORCES · ON' : 'REALISTIC FORCES · OFF', RX.forces);
+  set('mxTF', controls.terrainFollow ? 'TERRAIN FOLLOW · ON' : 'TERRAIN FOLLOW · OFF', controls.terrainFollow);
+  set('mxDebug', RX.debug ? 'DEBUG OVERLAY · ON' : 'DEBUG OVERLAY · OFF', RX.debug);
   set('mxTilt', controls.tiltOn ? 'TILT STEER · ON' : 'TILT STEER · OFF', controls.tiltOn);
   set('mxScan', RX.scanner ? 'AI ANALYSIS · ON' : 'AI ANALYSIS · OFF', RX.scanner);
   set('mxVoice', RX.voice ? 'CALLOUTS · ON' : 'CALLOUTS · OFF', RX.voice);
@@ -2940,6 +3029,9 @@ const RX_ACT = {
   mxUltra: () => setUltra(!RX.ultra), mxBlast: () => blastGo(), mxLand: () => rxLandToggle(), mxGhost: () => setGhost(!RX.ghost),
   mxScan: () => { RX.scanner = !RX.scanner; localStorage.setItem('canyon.ai', RX.scanner ? '1' : '0'); if (!RX.scanner) { $('aiBox').classList.add('hidden'); RX.aiLast = null; } rxMenuSync(); },
   mxForces: () => { RX.forces = !RX.forces; localStorage.setItem('canyon.forces', RX.forces ? '1' : '0'); pop(RX.forces ? 'REALISTIC FORCES ON · WIND / TURBULENCE / DAMAGE PULL' : 'REALISTIC FORCES OFF', 'banked'); rxMenuSync(); },
+  mxTF: () => { controls.terrainFollow = !controls.terrainFollow; localStorage.setItem('canyon.tf', controls.terrainFollow ? '1' : '0'); pop('TERRAIN FOLLOW ' + (controls.terrainFollow ? 'ON' : 'OFF · ALTITUDE HELD'), 'banked'); rxMenuSync(); },
+  mxDebug: () => { RX.debug = !RX.debug; $('dbg').classList.toggle('hidden', !RX.debug); rxMenuSync(); },
+  optBtn: () => rxMenu(),
   mxTilt: () => { controls.tiltOn = !controls.tiltOn; localStorage.setItem('canyon.tilt', controls.tiltOn ? '1' : '0'); if (controls.tiltOn) controls.calibrate(0.1); pop('TILT STEER ' + (controls.tiltOn ? 'ON' : 'OFF'), 'banked'); rxMenuSync(); }, mxVoice: () => setVoice(!RX.voice),
   mxG: () => { RX.gfx = !RX.gfx; localStorage.setItem('canyon.gfx', RX.gfx ? '1' : '0'); rxMenuSync(); },
   mxCarrier: () => setCarrier(!RX.carrier), mxDrone: () => setDrone(!RX.drone), mxPip: () => cyclePip(),
@@ -2968,15 +3060,15 @@ $('rxTab').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPr
 $('rxTab').addEventListener('click', (e) => e.stopPropagation());
 $('rxMenu').addEventListener('pointerdown', (e) => { e.stopPropagation(); RX.mSw = { x: e.clientX, y: e.clientY, lx: e.clientX, sl: $('rxMenu').scrollLeft, v: 0, t: performance.now() }; });
 // JS drag-scroll for the tray (iOS Safari: the page blocks native touch scrolling, so the tray scrolls itself) + momentum
-addEventListener('pointermove', (e) => { const w = RX.mSw; if (!w) return; const m = $('rxMenu'), dx = e.clientX - w.lx, now = performance.now(); m.scrollLeft -= dx; w.v = dx / Math.max(1, now - w.t); w.lx = e.clientX; w.t = now; });
+addEventListener('pointermove', (e) => { const w = RX.mSw; if (!w) return; const m = $('rxMenu'), dx = e.clientX - w.lx, now = performance.now(); m.scrollLeft -= dx; m.scrollTop -= e.clientY - (w.ly ?? e.clientY); w.ly = e.clientY; w.v = dx / Math.max(1, now - w.t); w.lx = e.clientX; w.t = now; });
 addEventListener('pointercancel', () => { RX.mSw = null; });
-function trayFling(v) { const m = $('rxMenu'); let vv = v * 16; const tick = () => { if (Math.abs(vv) < 0.5 || RX.mSw) return; m.scrollLeft -= vv; vv *= 0.92; requestAnimationFrame(tick); }; requestAnimationFrame(tick); }
+function trayFling(v) { return; const m = $('rxMenu'); let vv = v * 16; const tick = () => { if (Math.abs(vv) < 0.5 || RX.mSw) return; m.scrollLeft -= vv; vv *= 0.92; requestAnimationFrame(tick); }; requestAnimationFrame(tick); }
 function trayPage(dir) { const m = $('rxMenu'); m.scrollTo({ left: m.scrollLeft + dir * m.clientWidth * 0.8, behavior: 'smooth' }); }
 function trayDots() { const m = $('rxMenu'), d = $('trayDots'); if (!d) return; const n = Math.max(1, Math.ceil(m.scrollWidth / m.clientWidth)), i = Math.round(m.scrollLeft / Math.max(1, m.scrollWidth - m.clientWidth) * (n - 1));
   if (d.childElementCount !== n) d.innerHTML = '<i></i>'.repeat(n); [...d.children].forEach((c, k) => c.classList.toggle('on', k === i)); $('trayL').classList.toggle('dim', m.scrollLeft < 4); $('trayR').classList.toggle('dim', m.scrollLeft > m.scrollWidth - m.clientWidth - 4); }
 $('rxMenu').addEventListener('scroll', trayDots); setInterval(trayDots, 500);
 for (const [id, dir] of [['trayL', -1], ['trayR', 1]]) { $(id).addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); trayPage(dir); }); }
-$('rxMenu').addEventListener('pointerup', (e) => { const w = RX.mSw; RX.mSw = null; if (w && Math.abs(w.v) > 0.3) trayFling(w.v); if (w && e.clientY - w.y > 50 && e.clientY - w.y > Math.abs(e.clientX - w.x) * 1.5) rxMenu(false); }); // tray scrolls sideways; swipe down to close
+$('rxMenu').addEventListener('pointerup', (e) => { const w = RX.mSw; RX.mSw = null; if (w && Math.abs(w.v) > 0.3) trayFling(w.v); if (w && w.y - e.clientY > 60 && w.y - e.clientY > Math.abs(e.clientX - w.x) * 1.5 && $('rxMenu').scrollTop <= 0) rxMenu(false); }); // tray scrolls sideways; swipe down to close
 $('rxScrim').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); rxMenu(false); }); // tap outside closes
 $('voiceChip').addEventListener('click', (e) => { e.stopPropagation(); setVoice(!RX.voice); });
 addEventListener('keydown', (e) => {
@@ -3088,7 +3180,7 @@ function tick(dt, draw) {
   const rdt = dt; dt *= RX.timeScale;
   S.t += dt;
   controls.update(rdt);
-  rxUpdateZones();
+  rxUpdateZones(); dbgUpdate();
   let thr = controls.throttle, spdN = spdNf(S.speed);
   if (S.mode !== 'crashed') {
     // fixed sub-steps: never move more than ~20 m (8700 km/h) between swept collision tests, at any frame rate

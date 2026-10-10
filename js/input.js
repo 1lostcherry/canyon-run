@@ -46,6 +46,8 @@ export class Controls {
   barHit(x, id, padIn, padOut) { const b = document.getElementById(id).getBoundingClientRect(); return b.width > 0 && x > b.left - padIn && x < b.right + padOut ? b : null; }
   onSlider(x) { return !!(this.barHit(x, 'thrBar', 50, 40) || this.barHit(x, 'altBar', 40, 50)); }
   attachPointer(el, isUI) {
+    if (!localStorage.getItem('canyon.v50mig')) { for (const k of ['canyon.safe', 'canyon.safe47', 'canyon.tilt', 'canyon.forces', 'canyon.ai', 'canyon.smart', 'canyon.tf']) localStorage.setItem(k, '0'); localStorage.setItem('canyon.v50mig', '1'); } // one-time v50 reset of stale assist settings
+    this.terrainFollow = localStorage.getItem('canyon.tf') === '1';
     this.drags = new Map(); this.altStick = 0; this.fingerHeight = localStorage.getItem('canyon.fingerH') !== '0'; this.fingerT = null;
     el.addEventListener('pointerdown', (e) => {
       if (!this.enabled || isUI(e.target)) return;
