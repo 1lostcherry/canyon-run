@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=48';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=48';
-import { loadAssets } from './assets.js?v=48';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=49';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=49';
+import { loadAssets } from './assets.js?v=49';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=48';
-import { GpuDust } from './gpudust.js?v=48';
-import { PostFX } from './postfx.js?v=48';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=48';
-import { GameAudio } from './audio.js?v=48';
-import { Controls } from './input.js?v=48';
+import { Grass } from './grass.js?v=49';
+import { GpuDust } from './gpudust.js?v=49';
+import { PostFX } from './postfx.js?v=49';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=49';
+import { GameAudio } from './audio.js?v=49';
+import { Controls } from './input.js?v=49';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -983,7 +983,12 @@ function updateFlight(dt) {
   S.vel.copy(_fwd).multiplyScalar(S.speed);
   if (Math.abs(S.vel.y) > vmax) S.vel.y = Math.sign(S.vel.y) * vmax;
   (S.prevPos || (S.prevPos = new THREE.Vector3())).copy(S.pos);
-  S.pos.addScaledVector(S.vel, dt);
+  if (S.holdDirect && S.speed > 2500 && !RX.blast) { // v49 high-speed terrain envelope: sub-stepped vertical tracking along the frame's path (1 frame = 150+ m)
+    const T = controls.altTarget ?? 30, n = Math.min(24, Math.ceil(S.speed * dt / 40)), sdt = dt / n, vm = vmax, y0 = S.pos.y; let y = y0;
+    const hx = S.vel.x * sdt, hz = S.vel.z * sdt; let px = S.pos.x, pz = S.pos.z;
+    for (let i = 0; i < n; i++) { px += hx; pz += hz; const gE = Math.max(world.surface(px, pz), world.surface(px + hx * 2, pz + hz * 2) - 15); y += clamp(gE + T - y, -vm * sdt, vm * sdt); }
+    S.pos.x = px; S.pos.z = pz; S.pos.y = y; S.vel.y = (y - y0) / dt; S.pitch = damp(S.pitch, Math.asin(clamp(S.vel.y / S.speed, -0.5, 0.5)), 10, dt);
+  } else S.pos.addScaledVector(S.vel, dt);
   geyserForces(dt);
   { const gC = world.surface(S.pos.x, S.pos.z); if (!RX.above && S.pos.y > gC + MAX_AGL) { S.pos.y = gC + MAX_AGL; S.pitch = Math.min(S.pitch, 0); } } // hard cap: 500 m above the ground
   rxLayer();
