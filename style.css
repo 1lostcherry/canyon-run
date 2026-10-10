@@ -362,3 +362,11 @@ body.tray-open #rotate { display: none !important; }
 #rxMenu .mx { flex: 1 1 auto !important; width: auto !important; max-width: none !important; overflow: visible; text-overflow: clip; padding: 3px 7px !important; }
 #rxMenu #mxGod { flex: 1.6 1 auto !important; }
 @media (orientation: portrait) { #rxMenu .mx { flex: 1 1 30% !important; } }
+
+/* v53 boundary hint + clean HUD toggle */
+#bndInd { position: absolute; left: 50%; transform: translateX(-50%); top: 30%; z-index: 26; font: 900 11px system-ui; letter-spacing: 2px; color: #fff; background: rgba(255,120,40,0.6); padding: 4px 10px; border-radius: 9px; pointer-events: none; } #bndInd.hidden { display: none; }
+#cleanX { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 4px); left: 50%; transform: translateX(-50%) translateX(150px); z-index: 60; width: 30px; height: 30px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.45); background: rgba(0,0,0,0.4); color: #fff; font: 900 14px system-ui; padding: 0; pointer-events: auto; }
+body.clean #cleanX { opacity: 0.55; transform: translateX(-50%); }
+body.clean #hud > *:not(#fireBtn):not(#cleanX):not(#thrBar):not(#altBar):not(#vignette) { display: none !important; }
+body.clean #thrBar, body.clean #altBar { opacity: 0 !important; }
+body.clean #aiBox, body.clean #fzBonus, body.clean #safeAlt, body.clean #godBadge, body.clean #assistInd, body.clean #tfInd, body.clean #bndInd, body.clean #dbg, body.clean #optBtn { display: none !important; }

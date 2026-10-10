@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=52';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=52';
-import { loadAssets } from './assets.js?v=52';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=53';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=53';
+import { loadAssets } from './assets.js?v=53';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=52';
-import { GpuDust } from './gpudust.js?v=52';
-import { PostFX } from './postfx.js?v=52';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=52';
-import { GameAudio } from './audio.js?v=52';
-import { Controls } from './input.js?v=52';
+import { Grass } from './grass.js?v=53';
+import { GpuDust } from './gpudust.js?v=53';
+import { PostFX } from './postfx.js?v=53';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=53';
+import { GameAudio } from './audio.js?v=53';
+import { Controls } from './input.js?v=53';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -23,6 +23,7 @@ let TOP_KMH = NORMAL_KMH;
 const thrKmh = (t) => MIN_KMH + Math.pow(t, 2.2) * (TOP_KMH - MIN_KMH); // curved throttle: fine control at low speed, full range to the top
 let AHEAD = 16; const BEHIND = 2; // 3.8 km of terrain + obstacles ahead (>1.5 s at 8700 km/h)
 const CEILING = 100000; // v42: no absolute ceiling; the cap is terrain-relative (MAX_AGL)
+const BND_SOFT = 900, BND_HARD = 1500; // v53 lateral world limits (m from route); chunk mesh spans ±3000 m
 const MAX_AGL = 500, SAFE_AGL = 450, OBJ_CAP = 450;
 
 window.addEventListener('error', (e) => { const el = $('err'); el.classList.remove('hidden'); el.textContent += (e.message || e) + '\n'; });
@@ -326,9 +327,54 @@ function updateBiomeEnv(dt) {
   water.position.set(Math.round(camera.position.x / 30) * 30, 0, Math.round(z / 30) * 30);
   waterMat.uniforms.swell.value = lerp(SWELL[B.a] ?? 0.35, SWELL[B.b] ?? 0.35, t);
   waterMat.uniforms.time.value = S.t;
+  { // v53 JURASSIC start valley: humid green mist + prehistoric life
+    const jk = world.segs[0].type === 'grass' ? ((B.a === 'grass' ? 1 - t : 0) + (B.b === 'grass' ? t : 0)) * (-z < world.segs[0].end + 800 ? 1 : 0) : 0; E.jurK = jk;
+    if (jk > 0) { FOG_BASE.lerp(JUR_FOG, 0.55 * jk); hazeU.hazeK.value *= 1 + 0.15 * jk; hazeU.hazeCol.value.lerp(JUR_FOG, 0.35 * jk); if (main === 'grass') E.name = 'JURASSIC VALLEY'; }
+    jurassicUpdate(jk, dt);
+  }
   rxIceEnv(dt);
   if (S.mode === 'playing' && lastBiome && main !== lastBiome) { pop('ENTERING ' + E.name, 'unlock'); }
   lastBiome = main;
+}
+
+// ---------- v53 JURASSIC: volcano silhouette, grazing sauropods, gliding pterosaurs (procedural, ~20 draw calls) ----------
+const JUR_FOG = new THREE.Color().setRGB(0.55, 0.66, 0.52, LIN);
+const JUR = (() => {
+  const g = new THREE.Group(); g.visible = false; scene.add(g);
+  const volMat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(0.16, 0.13, 0.12, LIN), roughness: 1, flatShading: true });
+  const vg = new THREE.CylinderGeometry(260, 2100, 1500, 28, 6, true); { const pa = vg.attributes.position; for (let i = 0; i < pa.count; i++) { const y = pa.getY(i), a = Math.atan2(pa.getZ(i), pa.getX(i)); const j = 1 + 0.08 * Math.sin(a * 7 + y * 0.01) + 0.05 * Math.sin(a * 13); pa.setX(i, pa.getX(i) * j); pa.setZ(i, pa.getZ(i) * j); } vg.computeVertexNormals(); }
+  const vol = new THREE.Mesh(vg, volMat); g.add(vol);
+  const smokeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color().setRGB(0.35, 0.33, 0.32, LIN), transparent: true, opacity: 0.5, depthWrite: false });
+  const smoke = []; for (let i = 0; i < 6; i++) { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), smokeMat); g.add(m); smoke.push(m); }
+  const skin = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(0.26, 0.24, 0.18, LIN), roughness: 0.9 });
+  const mkSauro = () => { const d = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), skin); body.scale.set(7, 5, 11); body.position.y = 13; d.add(body);
+    const neck = new THREE.Group(); neck.position.set(0, 15, -9); d.add(neck);
+    const nm = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 2.2, 22, 8), skin); nm.position.set(0, 10, -4); nm.rotation.x = -0.4; neck.add(nm);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(1.4, 8, 6), skin); head.scale.set(1, 0.8, 1.7); head.position.set(0, 20.5, -8.5); neck.add(head);
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(2.6, 26, 8), skin); tail.rotation.x = -Math.PI / 2 - 0.15; tail.position.set(0, 11, 22); d.add(tail);
+    for (const [x, z] of [[-4, -6], [4, -6], [-4, 6], [4, 6]]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.7, 11, 7), skin); l.position.set(x, 5.5, z); d.add(l); }
+    d.userData.neck = neck; return d; };
+  const sauros = []; for (let i = 0; i < 8; i++) { const d = mkSauro(); g.add(d); sauros.push({ d, ph: i * 1.7 }); }
+  const wingMat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(0.3, 0.2, 0.14, LIN), roughness: 0.8, side: THREE.DoubleSide });
+  const mkPtero = () => { const p = new THREE.Group(); const b = new THREE.Mesh(new THREE.ConeGeometry(0.5, 4, 6), wingMat); b.rotation.x = -Math.PI / 2; p.add(b);
+    const wg = new THREE.BufferGeometry(); wg.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, -1, 0, 0, 1, 6, 0, 0.6], 3)); wg.computeVertexNormals();
+    const L = new THREE.Mesh(wg, wingMat), R = new THREE.Mesh(wg, wingMat); R.scale.x = -1; p.add(L, R); p.userData.w = [L, R]; p.scale.setScalar(1.6); return p; };
+  const pteros = []; for (let i = 0; i < 7; i++) { const p = mkPtero(); g.add(p); pteros.push({ p, ph: i * 0.9, r: 140 + i * 35 }); }
+  return { g, vol, smoke, sauros, pteros };
+})();
+function jurassicUpdate(jk, dt) {
+  const on = jk > 0.05 && !(RX.iceK > 0.5); JUR.g.visible = on; if (!on) return;
+  const cz = camera.position.z, t = S.t || 0;
+  const vz = Math.min(cz - 9000, -world.segs[0].end - 1500), vx = world.pathX(vz) + 4200; // volcano sits on the horizon, beyond the valley's end
+  JUR.vol.position.set(vx, 600, vz);
+  JUR.smoke.forEach((m, i) => { const k = ((t * 0.04 + i / 6) % 1); m.position.set(vx + k * 500, 1400 + k * 1400, vz + k * 200); m.scale.setScalar(220 + k * 700); });
+  const base = Math.floor(-cz / 700); // sauropod herds every ~700 m, well off the flight line
+  JUR.sauros.forEach((o, i) => { const z = -(base + (i >> 1)) * 700 - 400 - (i & 1) * 90, side = ((base + (i >> 1)) & 1) ? 1 : -1, cx = world.pathX(z), hw = world.halfW(z);
+    const x = cx + side * (hw * 0.9 + 260 + (i & 1) * 70); o.d.position.set(x, world.surface(x, z) - 1, z); o.d.rotation.y = side * 1.2 + Math.sin(o.ph) * 0.4; o.d.visible = z < world.segs[0].end * -1 + 0 ? false : true;
+    o.d.userData.neck.rotation.x = -0.25 + Math.sin(t * 0.5 + o.ph) * 0.25; });
+  JUR.pteros.forEach((o) => { const a = t * 0.25 + o.ph, z0 = cz - 900 - o.ph * 120, cx = world.pathX(z0); o.p.position.set(cx + Math.cos(a) * o.r, world.surface(cx, z0) + 160 + o.ph * 18, z0 + Math.sin(a) * o.r); o.p.rotation.set(0, -a, Math.sin(a) * 0.3);
+    const f = Math.sin(t * 3 + o.ph * 3) * 0.5; o.p.userData.w[0].rotation.z = f; o.p.userData.w[1].rotation.z = -f; });
 }
 
 // ---------- waterfalls ----------
@@ -407,7 +453,7 @@ function streamChunks(z, force) {
   for (const idx of [...chunks.keys()]) if (idx < cur - BEHIND || idx > cur + AHEAD) { removeChunk(idx); changed = true; }
   // generate 1 chunk per frame normally; catch up faster if the ship outruns the generator (8700 km/h)
   let missing = 0; for (let i = cur; i <= cur + AHEAD; i++) if (i >= 0 && !chunks.has(i)) missing++;
-  let budget = force ? 99 : missing > 12 ? 5 : missing > 4 ? 3 : missing > 1 ? 2 : 1;
+  let budget = force ? 99 : missing > 20 ? 10 : missing > 12 ? 6 : missing > 4 ? 3 : missing > 1 ? 2 : 1;
   for (let i = cur - BEHIND; i <= cur + AHEAD && budget > 0; i++) {
     if (i < 0 || chunks.has(i)) continue;
     addChunk(i); budget--; changed = true;
@@ -417,7 +463,7 @@ function streamChunks(z, force) {
 function resetWorld(seed) {
   DESTROYED.clear(); CHIPPED.clear(); S.boomZone = null; AIC.clear();
   for (const idx of [...chunks.keys()]) removeChunk(idx);
-  const fb = params.get('biome');
+  const fb = params.get('biome') || 'grass'; // v53: always start in the Jurassic meadow
   world = new World(seed); if (fb && ENV[fb]) world.setSeed(seed, fb);
   rxPatchWorld(world); rxClearDeckMeshes(); RX.zones = rxGenZones(seed); RX.nearZones.length = 0; RX.above = false;
   lastBiome = null; grass.reset();
@@ -512,6 +558,11 @@ const S = {
   boost: 0, boomArmed: true, crashT: 0, t: 0, shake: 0, storm: { k: 0, target: 0, next: 38 + Math.random() * 20, dur: 0 },
   camYaw: 0, camPitch: 0, camY: 35, fov: 60, agl: 30, autopilot: false, noCollide: false, hintT: 0, spawnAcc: { kick: 0, trail: 0, storm: 0, amb: 0, ember: 0 },
 };
+{ // v53 clean HUD: ✕ hides everything except FIRE; gestures keep working
+  const cx = $('cleanX'), set = (on) => { document.body.classList.toggle('clean', on); try { localStorage.setItem('canyon.clean', on ? '1' : '0'); } catch (e) {} };
+  try { set(localStorage.getItem('canyon.clean') === '1'); } catch (e) {}
+  if (cx) { const h = (e) => { e.preventDefault(); e.stopPropagation(); set(!document.body.classList.contains('clean')); }; cx.addEventListener('pointerdown', (e) => e.stopPropagation()); cx.addEventListener('click', h); }
+}
 window.__game = { S, controls, quality, renderer, scene, dust, glow, grass, chunks, get gdust() { return gdust; }, get world() { return world; } };
 
 function fmtTime(t) { const m = Math.floor(t / 60), sec = Math.floor(t % 60); return String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0'); }
@@ -989,6 +1040,9 @@ function updateFlight(dt) {
   S.heading -= turn * dt;
   const HMAX = 1.15;
   if (Math.abs(S.heading) > HMAX) S.heading = Math.sign(S.heading) * HMAX;
+  { // v53 soft world boundary: beyond 900 m off the route, gently turn back toward it (no effect inside, so no-input drift is untouched)
+    const off = S.pos.x - world.pathX(S.pos.z), k = clamp((Math.abs(off) - BND_SOFT) / 500, 0, 1); S.bndK = k;
+    if (k > 0 && S.mode === 'playing') { const hT = Math.sign(off) * (0.25 + 0.45 * k); if (Math.sign(off) * S.heading < Math.abs(hT)) S.heading += (hT - S.heading) * Math.min(1, k * 2.2 * dt); } }
   // pitch
   let ptarget = pitchIn * 0.30, prate = 5, vmax = 130;
   S.tfOn = false;
@@ -1025,6 +1079,8 @@ function updateFlight(dt) {
     S.pos.x = px; S.pos.z = pz; S.pos.y = y; S.vel.y = (y - y0) / dt; S.pitch = damp(S.pitch, Math.asin(clamp(S.vel.y / S.speed, -0.5, 0.5)), 10, dt);
   } else S.pos.addScaledVector(S.vel, dt);
   if (S.holdDirect && !S.car && S.mode === 'playing') { const gq = world.surface(S.pos.x, S.pos.z) + 1.5; if (S.pos.y < gq) S.pos.y = gq; } // hold never dips below ground
+  { const cx = world.pathX(S.pos.z), off = S.pos.x - cx; if (Math.abs(off) > BND_HARD) S.pos.x = cx + Math.sign(off) * BND_HARD; if (Math.abs(S.pos.x) > 2600) S.pos.x = Math.sign(S.pos.x) * 2600; }
+  { const bi = $('bndInd'); if (bi) { const on = (S.bndK || 0) > 0.02 && S.mode === 'playing'; if (bi._on !== on) { bi._on = on; bi.classList.toggle('hidden', !on); } } }
   geyserForces(dt);
   { const gC = Math.max(world.surface(S.pos.x, S.pos.z), S.holdDirect ? (S.floorRef ?? -1e9) : -1e9); if (!RX.above && S.pos.y > gC + MAX_AGL) { const ov = S.pos.y - gC - MAX_AGL; if (S.holdDirect) S.pos.y -= Math.min(ov, ov * dt * 1.5 + 0.3); else { S.pos.y -= ov > 80 ? ov - 80 : Math.min(ov, ov * dt * 2 + 0.5); S.pitch = Math.min(S.pitch, 0.02); } } } // hard cap: 500 m above the ground
   rxLayer();

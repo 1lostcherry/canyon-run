@@ -365,7 +365,7 @@ export function buildChunkGeometry(world, idx) {
 }
 
 // Objects (rock spires, mesas, boulders) + rings for a chunk
-export const ROCK_COL = { gorge: [0.26, 0.25, 0.2], desert: [0.42, 0.19, 0.09], volcanic: [0.07, 0.055, 0.05], fjord: [0.33, 0.34, 0.36], ocean: [0.2, 0.19, 0.17], coast: [0.82, 0.78, 0.68], grass: [0.62, 0.36, 0.2], jungle: [0.22, 0.24, 0.17] };
+export const ROCK_COL = { gorge: [0.26, 0.25, 0.2], desert: [0.42, 0.19, 0.09], volcanic: [0.07, 0.055, 0.05], fjord: [0.33, 0.34, 0.36], ocean: [0.2, 0.19, 0.17], coast: [0.82, 0.78, 0.68], grass: [0.86, 0.42, 0.17], jungle: [0.22, 0.24, 0.17] };
 export function genChunkContent(world, idx) {
   const rng = makeRng((world.seed * 9301 + idx * 49297 + 233280) >>> 0);
   const objs = [];
@@ -438,6 +438,14 @@ export function genChunkContent(world, idx) {
       objs.push({ type: 'jtree', x, y: g - 0.5, z, r: 7 + rng() * 9, h: 12 + rng() * 14, valley: false, rot: rng() * Math.PI * 2, variant: Math.floor(rng() * 3), col: [0.85 + rng() * 0.3, 0.95 + rng() * 0.3, 0.75 + rng() * 0.3] });
     }
     for (let i = 0; i < 40; i++) { const z = z0 - rng() * CHUNK_L, cx = world.pathX(z), hw = world.halfW(z); const x = cx + (rng() * 2 - 1) * hw * 1.6; if (Math.abs(x - cx) < hw * 0.3) continue; const rr = rng(); place('boulder', x, z, 3 + rr * rr * 12, 0, true); }
+  }
+  // v53 JURASSIC start valley: tall araucaria conifers, cycads/tree-ferns, mossy boulders
+  if (biome === 'grass' && world.segs[0].type === 'grass' && dist < world.segs[0].end) {
+    for (let i = 0; i < 70; i++) { const z = z0 - rng() * CHUNK_L, cx = world.pathX(z), hw = world.halfW(z), side = rng() < 0.5 ? -1 : 1; const x = cx + side * (hw * 0.5 + Math.pow(rng(), 1.4) * 1000); const g = world.gridHeight(x, z); if (g < 2 || g > 320) continue;
+      objs.push({ type: 'tree', x, y: g - 0.5, z, r: 3 + rng() * 2.5, h: 34 + rng() * 26, valley: false, rot: rng() * 6.28, variant: Math.floor(rng() * 4), col: [0.35 + rng() * 0.2, 0.55 + rng() * 0.2, 0.3 + rng() * 0.15] }); }
+    for (let i = 0; i < 160; i++) { const z = z0 - rng() * CHUNK_L, cx = world.pathX(z), hw = world.halfW(z), side = rng() < 0.5 ? -1 : 1; const x = cx + side * (hw * 0.35 + Math.pow(rng(), 1.8) * 800); const g = world.gridHeight(x, z); if (g < 1.5 || g > 320) continue;
+      const fern = rng() < 0.6; objs.push({ type: 'jtree', x, y: g - 0.5, z, r: fern ? 3 + rng() * 2.5 : 3 + rng() * 2, h: fern ? 4 + rng() * 4 : 9 + rng() * 9, valley: false, rot: rng() * 6.28, variant: 3 + Math.floor(rng() * 2), col: [0.7 + rng() * 0.3, 0.95 + rng() * 0.3, 0.55 + rng() * 0.25] }); }
+    for (const o of objs) if (o.type === 'boulder') { const t = 0.8 + rng() * 0.3; o.col = [0.36 * t, 0.42 * t, 0.24 * t]; }
   }
   // dense jungle canopy (broadleaf + palms) everywhere except the river
   if (biome === 'jungle') {
