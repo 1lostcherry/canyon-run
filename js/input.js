@@ -165,7 +165,8 @@ export class Controls {
       if (this.calibT < 0) { this.roll0 = clamp(this.rollF, -25, 25); this.pitch0 = this.pitchF; this.calibT = -1; }
     }
     let steer = 0, pitch = 0;
-    if (this.hasTilt) {
+    if (this.tiltOn === undefined) this.tiltOn = localStorage.getItem('canyon.tilt') === '1'; // v47: tilt steering defaults OFF
+    if (this.hasTilt && this.tiltOn) {
       // low-pass filter (time constant ~55 ms) -> responsive but jitter-free
       let pr = this.pitchRaw;
       while (pr - this.pitchF > 180) pr -= 360; while (pr - this.pitchF < -180) pr += 360;

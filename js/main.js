@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=46';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=46';
-import { loadAssets } from './assets.js?v=46';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=47';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=47';
+import { loadAssets } from './assets.js?v=47';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=46';
-import { GpuDust } from './gpudust.js?v=46';
-import { PostFX } from './postfx.js?v=46';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=46';
-import { GameAudio } from './audio.js?v=46';
-import { Controls } from './input.js?v=46';
+import { Grass } from './grass.js?v=47';
+import { GpuDust } from './gpudust.js?v=47';
+import { PostFX } from './postfx.js?v=47';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=47';
+import { GameAudio } from './audio.js?v=47';
+import { Controls } from './input.js?v=47';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -839,6 +839,7 @@ function safeAssist(steer, pitchIn, dt) {
   const T = clamp(1.5 + S.speed / 622, 1.5, 2.5);
   const r = predict(steer, pitchIn, T, 14, 4);
   let target = 0, es = steer, ep = pitchIn;
+  S.safeHit = r.hit;
   if (r.hit < Infinity) {
     let bestCost = Infinity;
     for (const st of [-1, -0.5, 0, 0.5, 1]) for (const pi of [pitchIn, 0.5, 1]) {
@@ -916,9 +917,9 @@ function setAutopilot(on, quiet) {
   S.autopilot = on; $('apBtn').classList.toggle('on', on); $('apInd').classList.toggle('hidden', !on);
   if (!quiet) pop(on ? 'AUTOPILOT ENGAGED' : 'AUTOPILOT OFF', 'banked');
 }
-let safeMode = localStorage.getItem('canyon.safe') === '1';
+let safeMode = localStorage.getItem('canyon.safe47') === '1'; // v47: SAFE assist defaults OFF
 function setSafe(on) {
-  safeMode = on; localStorage.setItem('canyon.safe', on ? '1' : '0');
+  safeMode = on; localStorage.setItem('canyon.safe47', on ? '1' : '0');
   $('safeBtn').classList.toggle('on', on); $('safeChip').textContent = 'Safe mode: ' + (on ? 'ON' : 'off');
   $('safeInd').classList.toggle('hidden', !on);
 }
@@ -949,11 +950,12 @@ function updateFlight(dt) {
   S.apManual = S.mode === 'playing' && S.autopilot && safeMode && !rxForceAP();
   if (S.apManual) { autopilotInput(S.apDt || dt); const a = safeAssist(steer, pitchIn, dt); steer = a.steer; pitchIn = a.pitch; }
   else if (S.mode === 'attract' || S.autopilot || rxForceAP()) { const a = S.apSub ? S.apLast : autopilotInput(S.apDt || dt); S.apLast = a; steer = a.steer; pitchIn = a.pitch; }
-  else if (S.mode === 'playing' && (safeMode || RX.smart)) { const a = safeAssist(steer, pitchIn, dt); S.holdDirect = Math.abs(a.pitch - pitchIn) < 0.05; steer = a.steer; pitchIn = a.pitch; } // assist only takes over pitch when it is actively avoiding
+  else if (S.mode === 'playing' && (safeMode || RX.smart)) { const a = safeAssist(steer, pitchIn, dt); const act = (S.safeHit ?? Infinity) < 1.5 && (Math.abs(a.steer - steer) > 0.04 || Math.abs(a.pitch - pitchIn) > 0.04); if (act) { S.holdDirect = false; steer = a.steer; pitchIn = a.pitch; S.assistT = 0.4; } } // assist only takes over pitch when it is actively avoiding
   const thr = S.mode === 'attract' ? Math.min(0.38, AP.thrCap) : (S.autopilot || rxForceAP()) ? Math.min(controls.throttle, AP.thrCap) : controls.throttle;
-  if (S.hp && S.mode === 'playing') steer += ((100 - S.hp.R) - (100 - S.hp.L)) * 0.0028;
-  steer += RX.jolt;
+  if (RX.forces && S.hp && S.mode === 'playing') steer += ((100 - S.hp.R) - (100 - S.hp.L)) * 0.0012; // REALISTIC FORCES only: subtle damage pull
+  if (RX.forces) steer += RX.jolt * 0.5; // turbulence / lightning jolts only with REALISTIC FORCES
   S.steerIn = steer; S.pitchIn = pitchIn;
+  S.assistT = Math.max(0, (S.assistT || 0) - dt); { const ai = $('assistInd'); if (ai) { const on = S.assistT > 0 && S.mode === 'playing' && !S.autopilot; if (ai._on !== on) { ai._on = on; ai.classList.toggle('hidden', !on); } } }
   S.steerS = damp(S.steerS, steer, 9, dt);
   // speed
   let target = thrKmh(thr) / 3.6 * (RX.ultra ? 1 : 1 - 0.2 * (S.snowK || 0)); // ULTRA always holds its full 124,700 km/h
@@ -970,13 +972,12 @@ function updateFlight(dt) {
   if (Math.abs(S.heading) > HMAX) S.heading = Math.sign(S.heading) * HMAX;
   // pitch
   let ptarget = pitchIn * 0.30, prate = 5, vmax = 130;
-  if (S.holdDirect) { const sp = Math.max(S.speed, 20); vmax = clamp(90 + sp * 0.25, 90, 3000);
-    const g0 = world.surface(S.pos.x, S.pos.z), L = clamp(sp * 0.3, 30, 700), dx = -Math.sin(S.heading), dz = -Math.cos(S.heading);
-    let gA = -1e9; for (const k of [0.5, 1, 2, 3]) gA = Math.max(gA, world.surface(S.pos.x + dx * L * k, S.pos.z + dz * L * k) - (k - 1) * 0); // anticipate rising ground over ~1 s
-    const gN = world.surface(S.pos.x + dx * L, S.pos.z + dz * L);
-    const ff = clamp((Math.max(gN, gA - 40 - Math.max(0, (controls.altTarget ?? 30) - 60)) - g0) / L * sp, -vmax, vmax), T = controls.altTarget ?? 30;
-    const vyT = clamp(ff * 0.9 + (T - S.agl) * 2.0, -vmax, vmax); S.vyT = vyT;
-    ptarget = Math.asin(clamp(vyT / sp, -0.75, 0.75)); prate = 12; }
+  if (S.holdDirect) { // v47 predictive terrain-envelope hold: aim at (ground + target) a short time ahead; most demanding sample wins
+    const sp = Math.max(S.speed, 20), T = controls.altTarget ?? 30, dx = -Math.sin(S.heading), dz = -Math.cos(S.heading);
+    vmax = clamp(90 + sp * 0.6, 90, 9000); let vyT = -1e9;
+    for (const tau of [0.035, 0.07, 0.12]) { const d = Math.max(sp * tau, 25 + tau * 60); const tt = d / sp; vyT = Math.max(vyT, (world.surface(S.pos.x + dx * d, S.pos.z + dz * d) + T - S.pos.y) / Math.max(tt, 0.04)); }
+    vyT = clamp(vyT, -vmax, vmax); S.vyT = vyT;
+    ptarget = Math.asin(clamp(vyT / sp, -0.8, 0.8)); prate = sp > 2000 ? 45 : 14; }
   S.pitch = damp(S.pitch, ptarget, prate, dt);
   _fwd.set(-Math.sin(S.heading) * Math.cos(S.pitch), Math.sin(S.pitch), -Math.cos(S.heading) * Math.cos(S.pitch));
   S.vel.copy(_fwd).multiplyScalar(S.speed);
@@ -1985,7 +1986,7 @@ function resetMissiles() {
 // voice callouts, real G-force meter (all built on our own flight model & art)
 // =====================================================================================
 const RX = {
-  ghost: false, wing: 0, warhead: 'he', ultra: false, scanner: true,
+  ghost: false, wing: 0, warhead: 'he', ultra: false, scanner: localStorage.getItem('canyon.ai') === '1', forces: localStorage.getItem('canyon.forces') === '1',
   voice: localStorage.getItem('canyon.voice') !== '0', gfx: localStorage.getItem('canyon.gfx') !== '0',
   timeScale: 1, jolt: 0, joltT: 0, joltDir: 0, above: false, zones: [], nearZones: [], noPatch: false,
   ice: false, iceK: 0, iceTint: new THREE.Color(1, 1, 1), freezeAmmo: 0, freezeCool: 0, wave: null, frozen: [],
@@ -2645,7 +2646,7 @@ function updateHazards(dt) {
   }
 }
 function geyserForces(dt) { // updraft + turbulence while inside a plume
-  const k = RX.inGeyser || 0; if (k <= 0) return;
+  const k = RX.inGeyser || 0; if (k <= 0 || !RX.forces) return;
   S.pos.y += 55 * k * dt;
   const ap = S.autopilot || rxForceAP() ? 0.25 : 1;
   RX.jolt += (Math.sin(S.t * 23) + Math.sin(S.t * 37 + 1)) * 0.22 * k * ap;
@@ -2655,7 +2656,7 @@ function geyserForces(dt) { // updraft + turbulence while inside a plume
 function boltNear(x0, z0) { // lightning that strikes near the ship jolts the controls
   if (S.mode !== 'playing') return;
   if (Math.hypot(x0 - S.pos.x, z0 - S.pos.z) > 320 || RX.phase > 0) return;
-  if (RX.god) { flash(0.4); return; } // GOD MODE: no control loss / damage
+  if (RX.god || !RX.forces) { flash(0.4); return; } // GOD MODE / no REALISTIC FORCES: no control loss
   RX.joltT = 2 + Math.random() * 2; RX.joltDir = Math.random() < 0.5 ? -1 : 1; S.shake = Math.max(S.shake, 1.6); flash(0.6);
   const floor = (S.autopilot || rxForceAP() || safeMode) ? 20 : 1; S.hp.B = Math.max(floor, S.hp.B - 6); S.noContactT = 0;
   pop('⚡ LIGHTNING STRIKE · CONTROLS JOLTED', 'close'); rxSay('Lightning strike.', 'bolt');
@@ -2801,6 +2802,8 @@ function rxMenuSync() {
   set('mxWar', RX.warhead === 'freeze' ? 'FREEZE MISSILE · ON' : 'FREEZE MISSILE · OFF', RX.warhead === 'freeze');
   set('mxUltra', RX.ultra ? 'ULTRA · 124,700 ON' : 'ULTRA · OFF', RX.ultra);
   set('mxGhost', RX.ghost ? 'GHOST · ON' : 'GHOST · OFF', RX.ghost);
+  set('mxForces', RX.forces ? 'REALISTIC FORCES · ON' : 'REALISTIC FORCES · OFF', RX.forces);
+  set('mxTilt', controls.tiltOn ? 'TILT STEER · ON' : 'TILT STEER · OFF', controls.tiltOn);
   set('mxScan', RX.scanner ? 'AI ANALYSIS · ON' : 'AI ANALYSIS · OFF', RX.scanner);
   set('mxVoice', RX.voice ? 'CALLOUTS · ON' : 'CALLOUTS · OFF', RX.voice);
   set('mxG', RX.gfx ? 'G-EFFECTS · ON' : 'G-EFFECTS · OFF', RX.gfx);
@@ -2930,7 +2933,9 @@ const RX_ACT = {
   mxWing: () => setWing((RX.wing + 1) % 3), mxWave: () => freezeWave(), mxCam: () => rideToggle(),
   mxWar: () => { RX.warhead = RX.warhead === 'he' ? 'freeze' : 'he'; pop(RX.warhead === 'freeze' ? '❄ FREEZE WARHEADS' : 'HIGH-EXPLOSIVE WARHEADS', 'banked'); rxMenuSync(); },
   mxUltra: () => setUltra(!RX.ultra), mxBlast: () => blastGo(), mxLand: () => rxLandToggle(), mxGhost: () => setGhost(!RX.ghost),
-  mxScan: () => { RX.scanner = !RX.scanner; rxMenuSync(); }, mxVoice: () => setVoice(!RX.voice),
+  mxScan: () => { RX.scanner = !RX.scanner; localStorage.setItem('canyon.ai', RX.scanner ? '1' : '0'); if (!RX.scanner) { $('aiBox').classList.add('hidden'); RX.aiLast = null; } rxMenuSync(); },
+  mxForces: () => { RX.forces = !RX.forces; localStorage.setItem('canyon.forces', RX.forces ? '1' : '0'); pop(RX.forces ? 'REALISTIC FORCES ON · WIND / TURBULENCE / DAMAGE PULL' : 'REALISTIC FORCES OFF', 'banked'); rxMenuSync(); },
+  mxTilt: () => { controls.tiltOn = !controls.tiltOn; localStorage.setItem('canyon.tilt', controls.tiltOn ? '1' : '0'); if (controls.tiltOn) controls.calibrate(0.1); pop('TILT STEER ' + (controls.tiltOn ? 'ON' : 'OFF'), 'banked'); rxMenuSync(); }, mxVoice: () => setVoice(!RX.voice),
   mxG: () => { RX.gfx = !RX.gfx; localStorage.setItem('canyon.gfx', RX.gfx ? '1' : '0'); rxMenuSync(); },
   mxCarrier: () => setCarrier(!RX.carrier), mxDrone: () => setDrone(!RX.drone), mxPip: () => cyclePip(),
   mxSwipe: () => { controls.swipeSteer = !controls.swipeSteer; localStorage.setItem('canyon.swipe', controls.swipeSteer ? '1' : '0'); pop(controls.swipeSteer ? 'SWIPE STEERING ON · DRAG TO FLY' : 'SWIPE STEERING OFF', 'banked'); rxMenuSync(); },

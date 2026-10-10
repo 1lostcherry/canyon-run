@@ -316,3 +316,4 @@ body.tray-open #trayTab, body.tray-open #trayHandle, body.tray-open #rxQuick, bo
 
 #rotate { bottom: auto !important; top: 45% !important; }
 @media (orientation: portrait) { #hint { top: 56% !important; bottom: auto !important; } #rotate { top: 62% !important; } }
+#assistInd { position: absolute; left: 50%; transform: translateX(-50%); top: 42%; z-index: 26; font: 900 11px system-ui; letter-spacing: 2px; color: #fff; background: rgba(40,140,255,0.6); padding: 4px 10px; border-radius: 9px; pointer-events: none; } #assistInd.hidden { display: none; }
