@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 
 export const CHUNK_L = 240;
-export const CHUNK_W = 3000;
-export const SEG_X = 200;
+export const CHUNK_W = 6000; // v41: double map width (same 15 m grid spacing)
+export const SEG_X = 400;
 export const SEG_Z = 16;
 export const DX = CHUNK_W / SEG_X;
 export const DZ = CHUNK_L / SEG_Z;
@@ -667,7 +667,7 @@ export function makeBoulderGeos() {
 
 // world-space detail noise, strata and low-altitude haze for terrain/rocks
 // CC0 PBR detail textures (Poly Haven) shared by all terrain/rock materials, triplanar-mapped
-export const TRI = { tRockD: { value: null }, tRockN: { value: null }, tSandD: { value: null }, tSandN: { value: null }, tGrassD: { value: null }, triK: { value: 0 }, triMean: { value: new THREE.Vector3(0.296, 0.388, 0.374) } };
+export const TRI = { uRO: { value: new THREE.Vector3() }, tRockD: { value: null }, tRockN: { value: null }, tSandD: { value: null }, tSandN: { value: null }, tGrassD: { value: null }, triK: { value: 0 }, triMean: { value: new THREE.Vector3(0.296, 0.388, 0.374) } };
 export function patchRockMaterial(mat, strata, hazeU, tri = false) {
   mat.defines = Object.assign(mat.defines || {}, { ROCKSTRATA: strata.toFixed(2) });
   if (tri) mat.defines.TRIPLANAR = 1;
@@ -676,20 +676,20 @@ export function patchRockMaterial(mat, strata, hazeU, tri = false) {
     if (hazeU) Object.assign(sh.uniforms, hazeU);
     Object.assign(sh.uniforms, TRI);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos; varying vec3 vWN;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos; varying vec3 vWN; uniform vec3 uRO;')
       .replace('#include <project_vertex>', `#include <project_vertex>
         vec4 wpX = vec4(transformed, 1.0);
         vec3 wnX = objectNormal;
         #ifdef USE_INSTANCING
           wpX = instanceMatrix * wpX; wnX = mat3(instanceMatrix) * wnX;
         #endif
-        vWPos = (modelMatrix * wpX).xyz; vWN = normalize(mat3(modelMatrix) * wnX);`);
+        vWPos = (modelMatrix * wpX).xyz + uRO; vWN = normalize(mat3(modelMatrix) * wnX);`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         varying vec3 vWPos; varying vec3 vWN;
         uniform sampler2D tRockD; uniform sampler2D tRockN; uniform sampler2D tSandD; uniform sampler2D tSandN; uniform sampler2D tGrassD; uniform float triK; uniform vec3 triMean;
         vec3 triW(vec3 n){ vec3 w = pow(abs(n), vec3(4.0)); return w / (w.x + w.y + w.z); }
-        uniform vec3 hazeSun; uniform vec3 hazeCol; uniform float hazeK; uniform float hazeH;
+        uniform vec3 hazeSun; uniform vec3 hazeCol; uniform float hazeK; uniform float hazeH; uniform vec3 uRO;
         float hshR(vec2 p){ p = mod(p, 512.0); return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float vnR(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
           return mix(mix(hshR(i), hshR(i+vec2(1.0,0.0)), f.x), mix(hshR(i+vec2(0.0,1.0)), hshR(i+vec2(1.0,1.0)), f.x), f.y); }`)
@@ -705,7 +705,7 @@ export function patchRockMaterial(mat, strata, hazeU, tri = false) {
           #ifdef TRIPLANAR
           if (triK > 0.0) {
             vec3 N = normalize(vWN), w = triW(N);
-            float dW = length(vWPos - cameraPosition);
+            float dW = length(vWPos - (cameraPosition + uRO));
             float near = 1.0 - smoothstep(250.0, 1400.0, dW);
             vec3 sc = wp * 0.09, sm = wp * 0.013;
             float rx = dot(texture2D(tRockD, sc.zy).rgb, vec3(0.333)) * 0.6 + dot(texture2D(tRockD, sm.zy).rgb, vec3(0.333)) * 0.4;
@@ -722,7 +722,7 @@ export function patchRockMaterial(mat, strata, hazeU, tri = false) {
         #ifdef TRIPLANAR
         if (triK > 0.0) {
           vec3 N = normalize(vWN), w = triW(N), wp = vWPos * 0.09;
-          float k = triK * (1.0 - smoothstep(150.0, 900.0, length(vWPos - cameraPosition))) * 0.9;
+          float k = triK * (1.0 - smoothstep(150.0, 900.0, length(vWPos - (cameraPosition + uRO)))) * 0.9;
           vec3 tx = texture2D(tRockN, wp.zy).xyz * 2.0 - 1.0, ty = texture2D(tSandN, wp.xz).xyz * 2.0 - 1.0, tz = texture2D(tRockN, wp.xy).xyz * 2.0 - 1.0;
           tx.xy *= k; ty.xy *= k; tz.xy *= k;
           vec3 nX = vec3(tx.xy + N.zy, abs(tx.z) * N.x), nY = vec3(ty.xy + N.xz, abs(ty.z) * N.y), nZ = vec3(tz.xy + N.xy, abs(tz.z) * N.z);
@@ -733,11 +733,11 @@ export function patchRockMaterial(mat, strata, hazeU, tri = false) {
       .replace('#include <fog_fragment>', `#include <fog_fragment>
         #ifdef USE_FOG
         {
-          float distW = length(vWPos - cameraPosition);
+          float distW = length(vWPos - (cameraPosition + uRO));
           float hf = (1.0 - smoothstep(0.0, 150.0, vWPos.y)) * smoothstep(fogNear * 0.3, fogFar * 0.7, distW) * hazeH;
           gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, hf);
           // forward scattering: haze glows toward the sun colour when looking sunward
-          float sunAmt = pow(max(dot(normalize(vWPos - cameraPosition), hazeSun), 0.0), 5.0);
+          float sunAmt = pow(max(dot(normalize(vWPos - (cameraPosition + uRO)), hazeSun), 0.0), 5.0);
           gl_FragColor.rgb = mix(gl_FragColor.rgb, hazeCol, clamp((fogFactor + hf) * sunAmt * hazeK, 0.0, 0.85));
         }
         #endif`);

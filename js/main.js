@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=40';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=40';
-import { loadAssets } from './assets.js?v=40';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=41';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=41';
+import { loadAssets } from './assets.js?v=41';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=40';
-import { GpuDust } from './gpudust.js?v=40';
-import { PostFX } from './postfx.js?v=40';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=40';
-import { GameAudio } from './audio.js?v=40';
-import { Controls } from './input.js?v=40';
+import { Grass } from './grass.js?v=41';
+import { GpuDust } from './gpudust.js?v=41';
+import { PostFX } from './postfx.js?v=41';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=41';
+import { GameAudio } from './audio.js?v=41';
+import { Controls } from './input.js?v=41';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -200,17 +200,31 @@ const SWELL = { ocean: 1, coast: 0.75, fjord: 0.45, gorge: 0, jungle: 0 };
 const WATER_BIOMES = { ocean: 1, coast: 1, fjord: 1, gorge: 1, jungle: 1 };
 // animated water: wave normals, fresnel sky reflection, sun glint; semi-transparent so shallows show turquoise sand
 const WTRAIL = []; for (let i = 0; i < 10; i++) WTRAIL.push(new THREE.Vector4(0, 0, 9, 0));
+// ---------- v41: floating origin (render-space rebasing) ----------
+// Simulation stays in absolute world metres (JS doubles). The whole scene graph is shifted by -RO so GPU-side
+// positions stay small and precise far from spawn; shaders that need absolute coords for patterns add uRO back.
+const RO = new THREE.Vector3(), RO_U = { value: RO };
+const toSim = (v) => v.add(RO); // matrixWorld-derived positions -> simulation space
+{ // Object3D.lookAt takes a world-space target; game code passes simulation-space targets, so shift them into render space
+  const la = THREE.Object3D.prototype.lookAt, _t = new THREE.Vector3();
+  THREE.Object3D.prototype.lookAt = function (x, y, z) {
+    if (x.isVector3) _t.copy(x); else _t.set(x, y, z);
+    if (RO.x !== 0 || RO.z !== 0) { let o = this.parent; while (o && o !== scene) o = o.parent; if (o === scene) _t.sub(RO); }
+    return la.call(this, _t);
+  };
+}
 const waterMat = new THREE.ShaderMaterial({
-  uniforms: { flow: { value: 0 }, hazeSun: hazeU.hazeSun, hazeCol: hazeU.hazeCol, hazeK: hazeU.hazeK, time: { value: 0 }, waterCol: { value: new THREE.Color(0.02, 0.2, 0.25) }, horC: skyMat.uniforms.horC, zenC: skyMat.uniforms.zenC, sunDir: { value: SUN }, sunCol: { value: new THREE.Color(1, 0.9, 0.75) }, fogColor: fogU.fogColor, fogNear: fogU.fogNear, fogFar: fogU.fogFar, glint: { value: 1 }, swell: { value: 1 }, frozen: { value: 0 },
+  uniforms: { uRO: RO_U, flow: { value: 0 }, hazeSun: hazeU.hazeSun, hazeCol: hazeU.hazeCol, hazeK: hazeU.hazeK, time: { value: 0 }, waterCol: { value: new THREE.Color(0.02, 0.2, 0.25) }, horC: skyMat.uniforms.horC, zenC: skyMat.uniforms.zenC, sunDir: { value: SUN }, sunCol: { value: new THREE.Color(1, 0.9, 0.75) }, fogColor: fogU.fogColor, fogNear: fogU.fogNear, fogFar: fogU.fogFar, glint: { value: 1 }, swell: { value: 1 }, frozen: { value: 0 },
     trail: { value: WTRAIL }, wash: { value: 0 }, washR: { value: 8 }, shipP: { value: new THREE.Vector3() } },
-  vertexShader: `uniform float time; uniform float swell; uniform float flow; varying vec3 vW;
+  vertexShader: `uniform vec3 uRO; uniform float time; uniform float swell; uniform float flow; varying vec3 vW;
     // long swells displace the surface (Gerstner, vertical + horizontal)
     vec3 gw(vec2 p, vec2 d, float L, float A, float Q){ float k = 6.2832 / L, w = sqrt(9.8 * k), ph = k * dot(d, p) - w * time; return vec3(d.x * Q * A * cos(ph), A * sin(ph), d.y * Q * A * cos(ph)); }
     void main(){ vec4 w = modelMatrix * vec4(position, 1.0);
       float fade = smoothstep(3500.0, 900.0, length(w.xz - cameraPosition.xz)) * swell * (1.0 - flow);
-      vec3 o = gw(w.xz, normalize(vec2(1.0, 0.25)), 210.0, 1.1, 0.6) + gw(w.xz, normalize(vec2(0.7, -0.7)), 140.0, 0.7, 0.6) + gw(w.xz, normalize(vec2(-0.3, 1.0)), 96.0, 0.45, 0.5);
-      w.xyz += o * fade; vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-  fragmentShader: `
+      vec2 wa = w.xz + uRO.xz; vec3 o = gw(wa, normalize(vec2(1.0, 0.25)), 210.0, 1.1, 0.6) + gw(wa, normalize(vec2(0.7, -0.7)), 140.0, 0.7, 0.6) + gw(wa, normalize(vec2(-0.3, 1.0)), 96.0, 0.45, 0.5);
+      w.xyz += o * fade; vW = w.xyz + uRO; gl_Position = projectionMatrix * viewMatrix * w; }`,
+  fragmentShader: `uniform vec3 uRO;
+
     uniform float flow; uniform vec3 hazeSun; uniform vec3 hazeCol; uniform float hazeK; uniform float time; uniform vec3 waterCol; uniform vec3 horC; uniform vec3 zenC; uniform vec3 sunDir; uniform vec3 sunCol; uniform float glint; uniform float swell; uniform float frozen;
     uniform vec3 fogColor; uniform float fogNear; uniform float fogFar; uniform vec4 trail[10]; uniform float wash; uniform float washR; uniform vec3 shipP; varying vec3 vW;
     float hsh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -219,7 +233,7 @@ const waterMat = new THREE.ShaderMaterial({
     void gw(vec2 p, vec2 d, float L, float A, float Q, float att, inout vec3 n, inout float h){ float k = 6.2832 / L, w = sqrt(9.8 * k), ph = k * dot(d, p) - w * time; float c = cos(ph), s = sin(ph); n.x -= d.x * k * A * c * att; n.z -= d.y * k * A * c * att; n.y -= Q * k * A * s * att; h += A * s * att; }
     void main(){
       vec2 p = vW.xz - vec2(0.0, time * 14.0 * flow);
-      float dist = length(cameraPosition - vW);
+      float dist = length((cameraPosition + uRO) - vW);
       float aMed = 1.0 / (1.0 + dist * 0.0012), aFine = 1.0 / (1.0 + dist * 0.006);
       vec3 n = vec3(0.0, 1.0, 0.0); float h = 0.0;
       float sw = swell * (1.0 - flow);
@@ -234,7 +248,7 @@ const waterMat = new THREE.ShaderMaterial({
       float e = 0.5, d0 = vn(q), dx = vn(q + vec2(e, 0.0)) - d0, dz = vn(q + vec2(0.0, e)) - d0;
       n.xz -= vec2(dx, dz) * 0.22 * aFine;
       n = normalize(n);
-      vec3 v = normalize(cameraPosition - vW);
+      vec3 v = normalize((cameraPosition + uRO) - vW);
       float fres = 0.02 + 0.72 * pow(1.0 - max(dot(n, v), 0.0), 5.0);
       vec3 r = reflect(-v, n); r.y = abs(r.y);
       vec3 refl = mix(horC * 0.5 + zenC * 0.35, zenC * 1.1, pow(clamp(r.y, 0.0, 1.0), 0.35));
@@ -414,6 +428,7 @@ let hdrEnv = envMap;
 if (ASSETS.hdr) { const pm = new THREE.PMREMGenerator(renderer); hdrEnv = pm.fromEquirectangular(ASSETS.hdr).texture; pm.dispose(); }
 if (ASSETS.ship) upgradeShip(ship, ASSETS.ship, ASSETS.ao, hdrEnv);
 if (ASSETS.rockD && ASSETS.sandD) { TRI.tRockD.value = ASSETS.rockD; TRI.tRockN.value = ASSETS.rockN; TRI.tSandD.value = ASSETS.sandD; TRI.tSandN.value = ASSETS.sandN; TRI.tGrassD.value = ASSETS.grassD || ASSETS.sandD; TRI.triK.value = 1; }
+TRI.uRO.value = RO; grass.U.uRO.value = RO; gdust.U.uRO.value = RO;
 scene.add(ship);
 ship.rotation.order = 'YXZ';
 const glowTex = makeGlowTexture();
@@ -804,7 +819,8 @@ function autopilotInput(dt = 1 / 60) {
   // throttle governor: no safe candidate (or thin margins) -> bleed speed; recover slowly when clear
   if (bestHit < Infinity) { AP.thrCap = Math.max(0, AP.thrCap - 3 * dt); st.noSafe++; }
   else if (bestClr < margin * 1.6) AP.thrCap = Math.max(0.15, AP.thrCap - 0.4 * dt);
-  else AP.thrCap = Math.min(1, AP.thrCap + (0.12 - 0.07 * AP.thrCap) * dt * MAX_KMH / TOP_KMH); // ULTRA: earn speed back slower // slower recovery near top speed
+  else AP.thrCap = Math.min(1, AP.thrCap + (0.12 - 0.07 * AP.thrCap) * dt * MAX_KMH / TOP_KMH);
+  if (TEST && window.__apNoGov) AP.thrCap = 1; // stress-test hook: autopilot at full throttle // ULTRA: earn speed back slower // slower recovery near top speed
   AP.best = best;
   let pitch = best[1];
   if (pitch === null) { const L2 = sp * 1.2, h = S.heading, g2 = Math.max(world.surface(S.pos.x, S.pos.z), world.surface(S.pos.x - Math.sin(h) * L2 * 0.5, S.pos.z - Math.cos(h) * L2 * 0.5), world.surface(S.pos.x - Math.sin(h) * L2, S.pos.z - Math.cos(h) * L2)); pitch = clamp((g2 + agl - S.pos.y) * 0.05, -0.8, 1); }
@@ -971,7 +987,7 @@ function updateFlight(dt) {
 const _cn = new THREE.Vector3();
 function findContacts() {
   ship.updateMatrixWorld(true);
-  const pts = SHIP_PROBES.map((p) => _probe.set(p[0], p[1], p[2]).applyMatrix4(ship.matrixWorld).clone());
+  const pts = SHIP_PROBES.map((p) => _probe.set(p[0], p[1], p[2]).applyMatrix4(ship.matrixWorld).add(RO).clone());
   const out = [];
   pts.forEach((p, k) => {
     const g = world.surface(p.x, p.z);
@@ -1095,7 +1111,7 @@ function updateDamage(dt) {
     S.smokeAcc = (S.smokeAcc || 0) + dt * (40 + 80 * sev) * quality.particles;
     while (S.smokeAcc > 1) {
       S.smokeAcc--;
-      _w.set(sx + (Math.random() - 0.5), 0.2, k === 'B' ? 3 : 2.5).applyMatrix4(ship.matrixWorld);
+      _w.set(sx + (Math.random() - 0.5), 0.2, k === 'B' ? 3 : 2.5).applyMatrix4(ship.matrixWorld).add(RO);
       const g = 0.07 + Math.random() * 0.07, back = Math.random() * dt * 0.65; // spread along this frame's path so the trail is continuous at any fps
       _w.x -= S.vel.x * back; _w.y -= S.vel.y * back; _w.z -= S.vel.z * back;
       dust.spawn(_w.x, _w.y, _w.z, S.vel.x * 0.8, S.vel.y * 0.8 + 2 + Math.random() * 3, S.vel.z * 0.8, 1.8 + Math.random() * 1.2, 3.0, 12 + 14 * sev, 0.62 + 0.3 * sev, g, g * 0.97, g * 0.95, 0.7, 2); // starts near ship speed so the plume streams off the wing instead of vanishing behind
@@ -1448,7 +1464,7 @@ function spawnDust(dt, thr, spdN) {
     while (A.trail > 1) {
       A.trail--;
       const s = Math.random() < 0.5 ? -1 : 1;
-      _w.set(s * 1.78, -0.2, 7 + Math.random() * 4).applyMatrix4(ship.matrixWorld);
+      _w.set(s * 1.78, -0.2, 7 + Math.random() * 4).applyMatrix4(ship.matrixWorld).add(RO);
       const sh = 0.8 + Math.random() * 0.2;
       dust.spawn(_w.x, _w.y, _w.z, v.x * 0.55, v.y * 0.5 + 1, v.z * 0.55, 0.9 + Math.random() * 0.8, 1.5, 9 + 10 * thr, 0.22 + 0.25 * low, E.dust[0] * 0.7 * sh, E.dust[1] * 0.75 * sh, E.dust[2] * 0.85 * sh, 2.5, 0);
     }
@@ -1457,7 +1473,7 @@ function spawnDust(dt, thr, spdN) {
     while (A.ember > 1) {
       A.ember--;
       const s = Math.random() < 0.5 ? -1 : 1;
-      _w.set(s * 1.78 + (Math.random() - 0.5) * 0.6, -0.15 + (Math.random() - 0.5) * 0.6, 7 + Math.random() * 6).applyMatrix4(ship.matrixWorld);
+      _w.set(s * 1.78 + (Math.random() - 0.5) * 0.6, -0.15 + (Math.random() - 0.5) * 0.6, 7 + Math.random() * 6).applyMatrix4(ship.matrixWorld).add(RO);
       glow.spawn(_w.x, _w.y, _w.z, v.x * 0.7 + (Math.random() - 0.5) * 6, v.y * 0.7 + (Math.random() - 0.5) * 6, v.z * 0.7, 0.25 + Math.random() * 0.3, 0.5, 0.15, 0.9, 1, 0.55, 0.2, 1, 0);
     }
   }
@@ -1615,7 +1631,7 @@ function updateHUD(dt) {
   hud.biome.textContent = E.name;
   hud.agl.textContent = 'ALT ' + Math.max(0, Math.round(S.agl)) + ' m';
   hud.score.textContent = Math.floor(S.score).toLocaleString('en-US');
-  hud.dist.textContent = (S.dist / 1000).toFixed(2) + ' km';
+  hud.dist.textContent = (S.dist >= 1e6 ? Math.round(S.dist / 1000).toLocaleString() : (S.dist / 1000).toFixed(S.dist >= 1e5 ? 1 : 2)) + ' km';
   hud.best.textContent = Math.max(S.best, Math.floor(S.score)).toLocaleString('en-US');
   hud.pct.textContent = Math.round(controls.throttle * 100) + '%';
   hud.combo.textContent = 'x' + comboMult().toFixed(1);
@@ -1781,7 +1797,7 @@ function fireMissile(opt = {}) {
   if (!opt.free) { MS.ammo--; MS.cool = 0.1; MS.fired++; }
   MS.pylon = -MS.pylon;
   ship.updateMatrixWorld(true);
-  if (opt.from) { m.p.copy(opt.from); m.p.y -= 1.2; } else m.p.set(MS.pylon * 3.4, -1.1, 0.6).applyMatrix4(ship.matrixWorld);
+  if (opt.from) { m.p.copy(opt.from); m.p.y -= 1.2; } else m.p.set(MS.pylon * 3.4, -1.1, 0.6).applyMatrix4(ship.matrixWorld).add(RO);
   m.ride = !!opt.ride; m.freeze = (!opt.free || opt.g47Freeze) && (RX.warhead === 'freeze' || RX.freezeAmmo > 0 || RX.fzBonus > 0 || !!opt.g47Freeze); // effect fixed at launch time if (m.freeze && RX.warhead !== 'freeze' && !(RX.fzBonus > 0) && !opt.g47Freeze) RX.freezeAmmo--;
   m.m.children[0].material.color.setRGB(m.freeze ? 0.45 : 1.0, m.freeze ? 0.85 : 0.55, m.freeze ? 1.3 : 0.2);
   _mf.copy(S.vel).normalize();
@@ -1904,7 +1920,7 @@ function updateMissiles(dt) {
   // HUD: lock reticle + ammo pips
   const ret = $('lockRet');
   if (MS.lock && S.mode === 'playing') {
-    aimPoint(MS.lock, _mt).project(camera);
+    aimPoint(MS.lock, _mt).sub(RO).project(camera);
     if (_mt.z < 1 && Math.abs(_mt.x) < 1.1 && Math.abs(_mt.y) < 1.1) {
       const x = (_mt.x * 0.5 + 0.5) * innerWidth, y = (-_mt.y * 0.5 + 0.5) * innerHeight;
       ret.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
@@ -2355,9 +2371,9 @@ const PFX = (() => {
         p += normalize(p + 0.001) * flash * 260.0 * aR.z;
         vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mv;
         gl_PointSize = clamp(px * (1.0 + 2.0 * aR.w) * 700.0 / -mv.z, 1.0, 4.5);
-        vA = (0.06 + 0.32 * e) * step(0.001, k) * (1.0 + flash * 2.0) * clamp(1.0 - flash * 0.8, 0.0, 1.0) + flash * 0.4 * (1.0 - flash * 0.6); vH = aR.y; }`,
+        vA = (0.04 + 0.2 * e) * step(0.001, k) * (1.0 + flash * 2.0) * clamp(1.0 - flash * 0.8, 0.0, 1.0) + flash * 0.4 * (1.0 - flash * 0.6); vH = aR.y; }`,
     fragmentShader: `uniform float ice; varying float vA; varying float vH;
-      void main(){ vec2 c = gl_PointCoord - 0.5; float d = dot(c, c); if (d > 0.25) discard; vec3 col = mix(mix(vec3(0.9, 0.3, 1.6), vec3(0.2, 0.8, 1.8), vH), vec3(0.7, 1.3, 2.0), ice); gl_FragColor = vec4(col * (1.0 - d * 3.0), vA); }` });
+      void main(){ vec2 c = gl_PointCoord - 0.5; float d = dot(c, c); if (d > 0.25) discard; vec3 col = mix(mix(vec3(0.9, 0.3, 1.6), vec3(0.2, 0.8, 1.8), vH), vec3(0.7, 1.3, 2.0), ice); gl_FragColor = vec4(col * 0.45 * (1.0 - d * 3.0), vA); }` });
   const pts = new THREE.Points(g, mat); pts.frustumCulled = false; pts.renderOrder = 16; portal.add(pts);
   return { pts, mat, max, n: max, slowT: 0 };
 })();
@@ -2860,7 +2876,7 @@ function scoutStrike() {
   for (const e of RX.enemies) if (!e.dead) damageJet(e, 99, e.p);
 }
 // picture-in-picture feed (low-res corner render after the main frame; skipped when quality drops)
-const pipCam = new THREE.PerspectiveCamera(62, 16 / 10, 1, 9000);
+const pipCam = new THREE.PerspectiveCamera(62, 16 / 10, 1, 9000); scene.add(pipCam); // in the scene graph so the floating origin applies
 function renderPip() {
   if (!RX.pip || RX.ride) { $('rxPip').classList.add('hidden'); return; }
   const src = RX.pip === 1 ? carrier : drone; if (!src || !src.mesh.visible) { $('rxPip').classList.add('hidden'); return; }
@@ -3004,6 +3020,13 @@ function frame(now) {
   dt = Math.min(Math.max(dt, 0.0005), 0.05);
   tick(dt, true);
 }
+function rebaseOrigin() { // keep render-space coordinates within ~4 km of the camera
+  if (params.has('noro')) return;
+  const c = camera.position;
+  if (Math.abs(c.x - RO.x) < 4096 && Math.abs(c.z - RO.z) < 4096) return;
+  RO.set(Math.round(c.x / 2048) * 2048, 0, Math.round(c.z / 2048) * 2048);
+  scene.position.set(-RO.x, 0, -RO.z); scene.updateMatrixWorld(true); RX.rebases = (RX.rebases || 0) + 1;
+}
 function tick(dt, draw) {
   const rdt = dt; dt *= RX.timeScale;
   S.t += dt;
@@ -3086,7 +3109,7 @@ function tick(dt, draw) {
   post.blur = quality.blur && S.mode !== 'crashed' ? clamp((S.speed * 3.6 - 900) / 1340, 0, 1) * 0.11 + (S.boostFx || 0) * 0.03 : 0;
   post.sat = 1 - 0.5 * Math.min(S.wx.rainK || 0, 1) - 0.25 * (S.wx.fogK || 0);
   { const rk = Math.min(S.wx.rainK || 0, 1); post.tint = post.tint || new THREE.Vector3(1, 1, 1); post.tint.set(1 - 0.17 * rk, 1 - 0.04 * rk, 1 + 0.14 * rk); }
-  if (draw) { post.render(scene, camera, S.t); renderPip(); adaptQuality(dt); }
+  if (draw) { rebaseOrigin(); post.render(scene, camera, S.t); renderPip(); adaptQuality(dt); }
 }
 requestAnimationFrame(frame);
 
@@ -3390,7 +3413,7 @@ function buildCockpit() {
   const metal = new THREE.MeshStandardMaterial({ color: 0x6d737c, metalness: 0.85, roughness: 0.28, envMap: hdrEnv, envMapIntensity: 1.1 });
   const rubber = new THREE.MeshStandardMaterial({ color: 0x2a2b2e, roughness: 0.75, envMap: hdrEnv, envMapIntensity: 0.4 });
   const edge = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.35, 0.75, 1.0), toneMapped: false }); // thin edge-light strips
-  const skin = new THREE.MeshPhysicalMaterial({ color: 0x737c82, roughness: 0.52, metalness: 0, sheen: 0.6, sheenColor: new THREE.Color(0.7, 0.8, 0.85), clearcoat: 0.25, clearcoatRoughness: 0.6, envMap: hdrEnv, envMapIntensity: 0.6 });
+  const skin = new THREE.MeshPhysicalMaterial({ color: 0x4f575d, roughness: 0.6, metalness: 0, sheen: 0.25, sheenColor: new THREE.Color(0.55, 0.62, 0.66), clearcoat: 0.08, clearcoatRoughness: 0.6, envMap: hdrEnv, envMapIntensity: 0.6 });
   const add = (geo, m, x, y, z, rx = 0, ry = 0, rz = 0, par = g) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.set(rx, ry, rz); par.add(o); return o; };
   const rbox = (w, h, d, r = 0.02) => { const sh = new THREE.Shape(); const x = -w / 2, y = -h / 2; sh.moveTo(x + r, y); sh.lineTo(x + w - r, y); sh.quadraticCurveTo(x + w, y, x + w, y + r); sh.lineTo(x + w, y + h - r); sh.quadraticCurveTo(x + w, y + h, x + w - r, y + h); sh.lineTo(x + r, y + h); sh.quadraticCurveTo(x, y + h, x, y + h - r); sh.lineTo(x, y + r); sh.quadraticCurveTo(x, y, x + r, y); const geo = new THREE.ExtrudeGeometry(sh, { depth: d, bevelEnabled: true, bevelSize: 0.012, bevelThickness: 0.012, bevelSegments: 2, curveSegments: 4 }); geo.translate(0, 0, -d / 2); return geo; };
   // cockpit lighting: sun-ish key + cool fill, local only
@@ -3466,7 +3489,7 @@ function viewCamera(dt) {
   else if (inCock) { ship.updateMatrixWorld(true); _cq.copy(ship.quaternion); _cp.set(0, 0.95, -1.6).applyQuaternion(_cq).add(S.pos);
     camera.fov = damp(camera.fov, 75, 4, dt); camera.updateProjectionMatrix();
     const y = cockpit.yoke; y.rotation.z = -S.steerS * 0.9; y.rotation.x = (S.pitchIn || 0) * 0.15;
-    cockpit.cig.visible = RX.cig; if (RX.cig) { cockpit.ember.material.opacity = 0.7 + 0.3 * Math.sin(S.t * 3.1); if (Math.random() < 0.15) { cockpit.ember.getWorldPosition(_v); dust.spawn(_v.x, _v.y + 0.02, _v.z, 0, 0.06, 0, 1.6, 0.02, 0.12, 0.25, 0.8, 0.8, 0.8, 0.3, 0); } }
+    cockpit.cig.visible = RX.cig; if (RX.cig) { cockpit.ember.material.opacity = 0.7 + 0.3 * Math.sin(S.t * 3.1); if (Math.random() < 0.15) { cockpit.ember.getWorldPosition(_v).add(RO); dust.spawn(_v.x, _v.y + 0.02, _v.z, 0, 0.06, 0, 1.6, 0.02, 0.12, 0.25, 0.8, 0.8, 0.8, 0.3, 0); } }
     if ((cockpit.t -= dt) <= 0) { cockpit.t = 0.15; drawGauges(cockpit.cx); cockpit.tex.needsUpdate = true; }
   } else {
     const o = c === 'g3' ? drone : carrier; if (!o) { RX.cam = 'chase'; return; }
@@ -3526,7 +3549,7 @@ function aiAnalysis() {
   return '<b class="bad">AI · ' + what + ' ' + tti.toFixed(1) + 's · ' + best + '</b>';
 }
 window.__game.forceCrash = () => crash();
-window.__game.v33 = { BASE, baseSeg, spawnIcehawk, rockDamage, CHIPPED, xform, get carRig() { return carRig; }, setCam, gsSupermode, setPhase, aiAnalysis, get cockpit() { return cockpit; }, get wingmen() { return wingmen; }, get carrier() { return carrier; }, get drone() { return drone; }, shotPool, misPool, DESTROYED };
+window.__game.v33 = { PFX, RO, rebaseOrigin, BASE, baseSeg, spawnIcehawk, rockDamage, CHIPPED, xform, get carRig() { return carRig; }, setCam, gsSupermode, setPhase, aiAnalysis, get cockpit() { return cockpit; }, get wingmen() { return wingmen; }, get carrier() { return carrier; }, get drone() { return drone; }, shotPool, misPool, DESTROYED };
 window.__game.ready = true;
 if (TEST) {
   S.noCollide = !params.has('collide');

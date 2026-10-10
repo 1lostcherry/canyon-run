@@ -5,7 +5,7 @@ import * as THREE from 'three';
 const BURSTS = 512;
 const VS = /* glsl */`
 precision highp float;
-uniform sampler2D bursts; uniform float time; uniform float per; uniform float pxScale; uniform vec3 sunDir; uniform vec3 sunCol;
+uniform vec3 uRO; uniform sampler2D bursts; uniform float time; uniform float per; uniform float pxScale; uniform vec3 sunDir; uniform vec3 sunCol;
 varying vec4 vC; varying float vSpark;
 float h(float n){ return fract(sin(n * 12.9898) * 43758.5453); }
 void main(){
@@ -33,7 +33,7 @@ void main(){
             0.6 * sin(q.x * 2.7 + time * 1.1 + h2 * 6.0),
             sin(q.x * 1.9 - time * 0.8 + h3 * 6.0) + sin(q.y * 2.9 + time)) * ta * (kind == 1.0 ? 0.8 : 2.4);
   p.y = max(p.y, B0.y - 0.3);
-  vec4 mv = viewMatrix * vec4(p, 1.0);
+  vec4 mv = viewMatrix * vec4(p - uRO, 1.0); // floating origin: sim coords -> render coords
   float u = age / life;
   float fade = smoothstep(0.0, 0.08, u) * (1.0 - u) * (1.0 - u);
   float grit = step(h5, 0.07);
@@ -41,7 +41,7 @@ void main(){
   gl_PointSize = clamp(size * pxScale / -mv.z, 1.0, 9.0);
   gl_Position = projectionMatrix * mv;
   // forward (back-lit) scattering toward the sun
-  vec3 vd = normalize(p - cameraPosition);
+  vec3 vd = normalize(p - uRO - cameraPosition);
   float ph = pow(max(dot(vd, sunDir), 0.0), 6.0);
   vec3 c = B2.rgb * (0.75 + 1.4 * ph) + sunCol * ph * 0.25;
   vSpark = grit * (0.6 + 0.4 * sin(time * 40.0 + k)) * (0.4 + ph * 2.5);
@@ -68,7 +68,7 @@ export class GpuDust {
     for (let b = 0; b < BURSTS; b++) this.data[b * 16 + 3] = -999;
     this.tex = new THREE.DataTexture(this.data, 4, BURSTS, THREE.RGBAFormat, THREE.FloatType);
     this.tex.minFilter = this.tex.magFilter = THREE.NearestFilter; this.tex.needsUpdate = true;
-    this.U = { bursts: { value: this.tex }, time: { value: 0 }, per: { value: 1 }, pxScale: { value: 800 }, sunDir: { value: sunDir }, sunCol: { value: sunCol }, ...fogU };
+    this.U = { uRO: { value: new THREE.Vector3() }, bursts: { value: this.tex }, time: { value: 0 }, per: { value: 1 }, pxScale: { value: 800 }, sunDir: { value: sunDir }, sunCol: { value: sunCol }, ...fogU };
     this.mat = new THREE.ShaderMaterial({ uniforms: this.U, vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: false });
     this.scene = scene; this.slot = 0; this.acc = 0;
     this.setCount(count);

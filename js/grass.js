@@ -1,6 +1,6 @@
 // GPU instanced grass with wind sway + jet-wash (radial push, flattened wake, outward ripple rings)
 import * as THREE from 'three';
-import { DX, DZ, X0, SEG_X } from './terrain.js?v=33';
+import { DX, DZ, X0, SEG_X } from './terrain.js?v=41';
 
 const ROWS = 64, COLS = SEG_X + 1, TRAIL = 10;
 
@@ -30,6 +30,7 @@ function tuftGeo(blades, segs, w, seed) {
 
 const VS = /* glsl */`
 precision highp float;
+uniform vec3 uRO;
 uniform sampler2D hMap; uniform vec2 anchor; uniform float spacing; uniform float rIn; uniform float rOut; uniform float hScale; uniform float tallK;
 uniform float time; uniform vec3 shipP; uniform float wash; uniform float washR; uniform float spd; uniform float lowK; uniform vec4 trail[${TRAIL}];
 attribute float aT; attribute float aSide; attribute vec2 aCell;
@@ -40,7 +41,7 @@ void main(){
   vec2 cell = floor(anchor / spacing) + aCell;
   float h1 = hash(cell), h2 = hash(cell + 17.3), h3 = hash(cell + 41.1);
   vec2 root = (cell + vec2(h1, h2)) * spacing;
-  float d = distance(root, cameraPosition.xz);
+  float d = distance(root, (cameraPosition + uRO).xz);
   // terrain height/density from ring texture (bilinear, matches gridHeight)
   float gx = (root.x - (${X0.toFixed(1)})) / ${DX.toFixed(4)}, gz = -root.y / ${DZ.toFixed(4)};
   int i = int(floor(gx)), j = int(floor(gz)); float fx = fract(gx), fz = fract(gz);
@@ -87,11 +88,12 @@ void main(){
   vec3 wp = vec3(root.x, hv.r - 0.15, root.y) + vec3(lp.x, 0.0, lp.z) + off;
   wp.y += lp.y * H * (1.0 - 0.55 * sag * sag);
   vT = t; vSheen = clamp(flt, 0.0, 1.0); vVar = h2; vW = wp; vDry = h1 * hv.g;
-  gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+  gl_Position = projectionMatrix * viewMatrix * vec4(wp - uRO, 1.0);
 }`;
 
 const FS = /* glsl */`
 precision highp float;
+uniform vec3 uRO;
 uniform vec3 sunDir; uniform vec3 sunCol; uniform vec3 skyCol; uniform vec3 gndCol; uniform float sunI; uniform float hemiI;
 uniform vec3 fogColor; uniform float fogNear; uniform float fogFar; uniform vec3 hazeCol; uniform float hazeK;
 varying float vT; varying float vSheen; varying float vVar; varying vec3 vW; varying float vDry;
@@ -99,12 +101,12 @@ void main(){
   vec3 base = mix(vec3(0.07, 0.14, 0.025), vec3(0.2, 0.3, 0.06), vVar);
   base = mix(base, vec3(0.36, 0.33, 0.1), smoothstep(0.55, 0.95, vDry) * 0.7);
   vec3 col = base * mix(0.35, 1.25, vT);
-  vec3 v = normalize(cameraPosition - vW);
+  vec3 v = normalize((cameraPosition + uRO) - vW);
   float back = pow(max(dot(-v, sunDir), 0.0), 3.0);
   vec3 lit = col * (sunCol * sunI * (0.32 + 0.25 * vT) + mix(gndCol, skyCol, vT) * hemiI * 0.55)
            + col * sunCol * sunI * back * vT * 0.6;
   lit = mix(lit, vec3(0.5, 0.55, 0.3) * sunCol * sunI * 0.35, vSheen * 0.55 * vT); // flattened blades show silvery sheen
-  float dist = length(cameraPosition - vW);
+  float dist = length((cameraPosition + uRO) - vW);
   float f = smoothstep(fogNear, fogFar, dist);
   lit = mix(lit, fogColor, f);
   lit = mix(lit, hazeCol, clamp(f * hazeK * pow(max(dot(-v, sunDir), 0.0), 5.0) * 1.3, 0.0, 0.85));
@@ -123,7 +125,7 @@ export class Grass {
     this.trailT = 0; this.trailI = 0;
     this.U = {
       hMap: { value: this.tex }, time: { value: 0 }, shipP: { value: new THREE.Vector3() }, wash: { value: 0 }, washR: { value: 8 },
-      trail: { value: this.trail }, spd: { value: 0 }, lowK: { value: 0 }, tallK: { value: 0 }, ...shared,
+      trail: { value: this.trail }, spd: { value: 0 }, lowK: { value: 0 }, tallK: { value: 0 }, uRO: { value: new THREE.Vector3() }, ...shared,
     };
     this.layers = [];
     this.group = new THREE.Group(); scene.add(this.group);
