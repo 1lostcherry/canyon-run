@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=41';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=41';
-import { loadAssets } from './assets.js?v=41';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=42';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=42';
+import { loadAssets } from './assets.js?v=42';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=41';
-import { GpuDust } from './gpudust.js?v=41';
-import { PostFX } from './postfx.js?v=41';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=41';
-import { GameAudio } from './audio.js?v=41';
-import { Controls } from './input.js?v=41';
+import { Grass } from './grass.js?v=42';
+import { GpuDust } from './gpudust.js?v=42';
+import { PostFX } from './postfx.js?v=42';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=42';
+import { GameAudio } from './audio.js?v=42';
+import { Controls } from './input.js?v=42';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -22,7 +22,8 @@ const NORMAL_KMH = 35620, ULTRA_KMH = 124700, BLAST_KMH = 470000, MPOV_KMH = 500
 let TOP_KMH = NORMAL_KMH;
 const thrKmh = (t) => MIN_KMH + Math.pow(t, 2.2) * (TOP_KMH - MIN_KMH); // curved throttle: fine control at low speed, full range to the top
 let AHEAD = 16; const BEHIND = 2; // 3.8 km of terrain + obstacles ahead (>1.5 s at 8700 km/h)
-const CEILING = 270;
+const CEILING = 100000; // v42: no absolute ceiling; the cap is terrain-relative (MAX_AGL)
+const MAX_AGL = 500, SAFE_AGL = 450, OBJ_CAP = 450;
 
 window.addEventListener('error', (e) => { const el = $('err'); el.classList.remove('hidden'); el.textContent += (e.message || e) + '\n'; });
 
@@ -386,7 +387,7 @@ function addChunk(idx) {
   scene.add(mesh);
   const { objs, falls } = genChunkContent(world, idx);
   rxDeckObjs(idx, objs); RX.noPatch = false;
-  const dead = DESTROYED.get(idx); objs.forEach((o, i) => { o.uid = idx * 4096 + i; if (dead && dead.has(i)) o.dead = true; const cr = CHIPPED.get(o.uid); if (cr) o.r = cr; const B = S.boomZone; if (B && Math.hypot(o.x - B.x, o.z - B.z) < B.r) o.dead = true; const bf = baseFlatK(o.x, o.z); if (bf && bf[0] > 0.3) o.dead = true; }); // base pad is cleared of rocks
+  const dead = DESTROYED.get(idx); objs.forEach((o, i) => { o.uid = idx * 4096 + i; if (dead && dead.has(i)) o.dead = true; const cr = CHIPPED.get(o.uid); if (cr) o.r = cr; const B = S.boomZone; if (B && Math.hypot(o.x - B.x, o.z - B.z) < B.r) o.dead = true; const bf = baseFlatK(o.x, o.z); if (bf && bf[0] > 0.3) o.dead = true; capObj(o); }); // base pad is cleared of rocks
   for (let i = falls.length - 1; i >= 0; i--) if (!params.has('falls') && makeRng(((S.seed || 1) ^ (idx * 0x2c1b3c6d)) >>> 0)() >= 0.02) falls.splice(i, 1); // rare: ~2% of eligible cliffs
   for (const f of falls) f.mesh = makeFalls(f);
   chunks.set(idx, { idx, mesh, objs, falls });
@@ -531,6 +532,7 @@ function refreshModeUI() {
 function resetRun(mode) {
   S.mode = mode;
   if (typeof resetMissiles === 'function' && misPool.length) resetMissiles();
+  controls.altTarget = 30;
   S.seed = params.has('seed') ? +params.get('seed') : daily && mode === 'playing' ? dailySeed() : (Math.random() * 1e9) | 0;
   RX.air = rxGenAir(S.seed); // before any chunk is built: base pads level the terrain
   resetWorld(S.seed);
@@ -851,9 +853,19 @@ function safeAssist(steer, pitchIn, dt) {
   const k = S.assist;
   return { steer: lerp(steer, S.safeEs ?? steer, k), pitch: lerp(pitchIn, S.safeEp ?? pitchIn, k) };
 }
+function inSafeBand() { return !RX.above && S.agl >= SAFE_AGL && S.mode === 'playing'; }
+function altHoldInput() { // PD hold toward the slider's terrain-relative target
+  const T = controls.altTarget ?? 30, vy = S.vel ? S.vel.y : 0;
+  return clamp((T - S.agl) / 45 - vy / 70, -1, 1);
+}
+function aileronRoll(dir) { // arc gesture: full 360 deg roll about the forward axis, heading untouched
+  if (S.mode !== 'playing' || S.rollT > 0) return;
+  S.rollT = S.rollDur = 1.0; S.rollDir = -dir; S.aileronRolls = (S.aileronRolls || 0) + 1; audio.whoosh(); pop(dir > 0 ? 'AILERON ROLL ▶' : '◀ AILERON ROLL', 'banked');
+}
+controls.onArc = (dir) => aileronRoll(dir);
 function barrelRoll() {
   if (S.mode !== 'playing' || S.rollT > 0) return;
-  S.rollT = 0.75; S.rollDir = S.steerS > 0.1 ? -1 : 1;
+  S.rollT = S.rollDur = 0.75; S.rollDir = S.steerS > 0.1 ? -1 : 1;
   audio.whoosh();
   if (S.agl < 40) addCombo('BARREL ROLL', 120, 'close'); else pop('BARREL ROLL', 'banked');
   if (S.agl < 20) unlock('roll');
@@ -930,7 +942,7 @@ function updateFlight(dt) {
     if (S.agl < 2) { if (!S.fallSeq) S.crashCause = 'ENGINE FAILURE · 7 HITS'; crash(); }
     return { thr: 0, spdN: spdNf(S.speed) };
   }
-  let steer = controls.steer, pitchIn = controls.pitch;
+  let steer = controls.steer, pitchIn = altHoldInput(); // altitude comes from the left slider target (0-500 m AGL)
   gatherObstacles();
   if (S.mode === 'playing' && S.autopilot && !TEST && !S.apManual) { S.apOverT = (Math.abs(controls.steer) > 0.85 || Math.abs(controls.pitch) > 0.85) ? (S.apOverT || 0) + dt : 0; if (S.apOverT > 0.5) setAutopilot(false); }
   S.apManual = S.mode === 'playing' && S.autopilot && safeMode && !rxForceAP();
@@ -964,7 +976,7 @@ function updateFlight(dt) {
   (S.prevPos || (S.prevPos = new THREE.Vector3())).copy(S.pos);
   S.pos.addScaledVector(S.vel, dt);
   geyserForces(dt);
-  if (S.pos.y > CEILING) { S.pos.y = CEILING; S.pitch = Math.min(S.pitch, 0); }
+  { const gC = world.surface(S.pos.x, S.pos.z); if (!RX.above && S.pos.y > gC + MAX_AGL) { S.pos.y = gC + MAX_AGL; S.pitch = Math.min(S.pitch, 0); } } // hard cap: 500 m above the ground
   rxLayer();
   const ground = world.surface(S.pos.x, S.pos.z);
   S.agl = S.pos.y - ground;
@@ -972,7 +984,7 @@ function updateFlight(dt) {
   S.roll = damp(S.roll, -S.steerS * 1.05 - (controls.touchSteer ? 0 : 0), 7, dt);
   ship.position.copy(S.pos);
   let rollAnim = 0;
-  if (S.rollT > 0) { S.rollT -= dt; const u = 1 - Math.max(S.rollT, 0) / 0.75; rollAnim = S.rollDir * Math.PI * 2 * (u * u * (3 - 2 * u)); }
+  if (S.rollT > 0) { S.rollT -= dt; const u = 1 - Math.max(S.rollT, 0) / (S.rollDur || 0.75); rollAnim = S.rollDir * Math.PI * 2 * (u * u * (3 - 2 * u)); }
   S.gRoll = damp(S.gRoll || 0, controls.rollCmd || 0, 8, dt); // gesture roll: attitude only, heading is untouched (never a U-turn)
   ship.rotation.set(S.pitch + (S.speed - S.prevSpeed) / dt * -0.0006, S.heading + S.steerS * 0.06, S.roll + rollAnim + S.gRoll);
   S.dist = Math.max(S.dist, -S.pos.z);
@@ -1035,6 +1047,7 @@ function resolveCollisions(dt) {
   }
   if (S.land) return false;
   if (rxSlabCheck()) return true;
+  if (inSafeBand()) { S.safeFrames = (S.safeFrames || 0) + 1; return false; } // SAFE ALTITUDE: above every obstacle
   const hp = S.hp;
   S.noContactT += dt;
   // swept test: sub-step along this frame's motion so thin obstacles can't tunnel at low fps / high speed
@@ -1608,16 +1621,16 @@ const hud = { hp: { box: $('hpBox'), L: $('hpL'), R: $('hpR'), B: $('hpB') }, ms
 hud.machMark.style.bottom = (Math.pow((MACH_KMH - MIN_KMH) / (TOP_KMH - MIN_KMH), 1 / 2.2) * 100) + '%';
 function updateHUD(dt) {
   hud.fill.style.height = (controls.throttle * 100).toFixed(1) + '%';
-  { // left climb/dive stick: shows the commanded pitch (stick + tilt), knob = stick position
-    const v = controls.altStick || 0, pv = clamp(controls.pitch, -1, 1), A = hud.alt;
-    A.knob.style.transform = `translateY(${(-v * A.bar.clientHeight * 0.46).toFixed(1)}px)`;
-    const hpx = Math.abs(pv) * 50;
-    A.fill.style.height = hpx.toFixed(1) + '%'; A.fill.style.marginTop = pv > 0 ? `-${(Math.abs(pv) * A.bar.clientHeight * 0.5).toFixed(1)}px` : '0px';
-    A.fill.classList.toggle('dn', pv < 0);
+  { // left altitude slider: knob = target (0 m bottom .. 500 m top), fill = actual height, top band 450-500 m = SAFE ALTITUDE
+    const A = hud.alt, T = controls.altTarget ?? 30, H = A.bar.clientHeight;
+    A.knob.style.transform = `translateY(${((0.5 - T / MAX_AGL) * H * 0.92).toFixed(1)}px)`;
+    A.fill.style.height = (clamp(S.agl / MAX_AGL, 0, 1) * 100).toFixed(1) + '%'; A.fill.style.marginTop = '0px'; A.fill.classList.remove('dn');
     const on = [...(controls.drags || new Map()).values()].some((d) => d.kind === 'alt');
     A.bar.classList.toggle('active', on);
-    const txt = Math.abs(pv) < 0.04 ? 'LEVEL' : (pv > 0 ? 'CLIMB' : 'DIVE');
+    const safe = inSafeBand(); A.bar.classList.toggle('safe', safe);
+    const txt = safe ? 'SAFE' : Math.round(T) + ' m';
     if (A.pct.textContent !== txt) A.pct.textContent = txt;
+    const sb = $('safeAlt'); if (sb) sb.classList.toggle('hidden', !safe);
   }
   hud.comboBar.style.transform = 'scaleX(' + (S.combo > 0 ? S.comboT / COMBO_TIME : 0).toFixed(3) + ')';
   hudT -= dt; if (hudT > 0) return; hudT = 1 / 15;
@@ -1649,7 +1662,7 @@ function updateCamera(dt, spdN) {
   const accel = (S.speed - S.prevSpeed) / Math.max(dt, 1e-3);
   S.camYaw = damp(S.camYaw, S.heading, 4.5, dt);
   S.camPitch = damp(S.camPitch, S.pitch * 0.35, 4, dt);
-  S.camY = damp(S.camY, S.pos.y, 6, dt);
+  S.camY = damp(S.camY, S.pos.y, 6, dt); S.camY = clamp(S.camY, S.pos.y - 4, S.pos.y + 4); // tall 0-500 m climbs: never let the camera fall below the jet
   S.dolly = damp(S.dolly || 0, clamp(accel * 0.012, -2, 4), 3, dt);
   const portrait = camera.aspect < 1;
   const ck = S.car ? S.car.k : 0, back = ((portrait ? 25 : 16) + S.dolly + spdN * 2.5) * (1 - 0.05 * ck), up = (portrait ? 6.5 : 5.5) * (1 - 0.15 * ck);
@@ -1989,6 +2002,11 @@ function baseFlatK(x, z) {
     return kk > 0 ? [kk, baseLevel(z)] : null; }
   return null;
 }
+function capObj(o) { // nothing on the map rises more than 450 m above the base ground (valley floor of the route)
+  if (o.type !== 'spire' && o.type !== 'mesa' && o.type !== 'tree' && o.type !== 'jtree') return;
+  const floor = Math.max(world.gridHeight0(world.pathX(o.z), o.z), 0), extra = o.type === 'spire' || o.type === 'mesa' ? 4 : 0;
+  const maxH = floor + OBJ_CAP - 2 - o.y - extra; if (o.h > maxH) { o.h = maxH; if (o.h < 6) o.dead = true; }
+}
 function rxPatchWorld(w) {
   const g0 = w.gridHeight.bind(w); w.gridHeight0 = g0;
   w.gridHeight = (x, z) => { let h = g0(x, z); const bf = baseFlatK(x, z); if (bf) h = h + (bf[1] - h) * bf[0]; if (!(RX.inSim ? SIM.ab : RX.above) || RX.noPatch) return h; const r = roofAt(z); return r ? Math.max(h, r.t) : h; };
@@ -2009,7 +2027,7 @@ function zoneReady(zn) {
   let f = 0;
   let lo = 1e9;
   for (let d = zn.start - 300; d <= zn.end + 300; d += 80) { const z = -d, cx = world.pathX(z); for (const o of [-150, -100, -50, 0, 50, 100, 150]) { const h = Math.max(world.gridHeight0(cx + o, z), 0); f = Math.max(f, h); lo = Math.min(lo, h); } }
-  zn.b = f + 90; zn.t = zn.b + ROOF_THICK;
+  zn.b = f + MAX_AGL + 25; zn.t = zn.b + ROOF_THICK; // deck underside sits above the 500 m cap so the SAFE ALTITUDE band is clear
   // only over open valley floors / sea with headroom above: rugged ground would form dead-end pockets under the deck
   if (zn.t > CEILING - 80 || f - lo > 130) { zn.b = -9; zn.t = -9; return false; }
   return true;
@@ -2530,7 +2548,7 @@ function updateHostiles(dt) {
     const sx = s.p.x - ox, sy = s.p.y - oy, sz = s.p.z - oz, sl = sx * sx + sy * sy + sz * sz;
     let u = sl > 0 ? ((S.pos.x - ox) * sx + (S.pos.y - oy) * sy + (S.pos.z - oz) * sz) / sl : 0; u = clamp(u, 0, 1);
     const dd = Math.hypot(ox + sx * u - S.pos.x, oy + sy * u - S.pos.y, oz + sz * u - S.pos.z);
-    if (dd < 7 && S.mode === 'playing' && !RX.ghost) {
+    if (dd < 7 && S.mode === 'playing' && !RX.ghost && !inSafeBand()) {
       s.on = false; s.s.visible = false;
       const floor = (S.autopilot || rxForceAP() || safeMode) ? 15 : 0;
       S.hp.B = Math.max(floor, S.hp.B - 9); S.noContactT = 0; flash(0.22); S.shake = Math.max(S.shake, 0.9); audio.scrape(0.8);
@@ -3223,7 +3241,7 @@ function baseThreats(A, d) {
     for (let k = 0; k < 6; k++) { const z = -(at + k * 70), x = world.pathX(z) + (Math.random() - 0.5) * 80; RX.bombs.push({ x, z, t: (at + k * 70 - S.dist) / Math.max(S.speed, 1) - 0.3 }); }
     pop('⚠ BOMBING RUN AHEAD', 'close');
   }
-  if (RX.bombs) for (let i = RX.bombs.length - 1; i >= 0; i--) { const b = RX.bombs[i]; b.t -= 1 / 60; if (b.t > 0) continue; RX.bombs.splice(i, 1); const y = world.surface(b.x, b.z); airburst(_v.set(b.x, y + 3, b.z)); if (Math.hypot(b.x - S.pos.x, b.z - S.pos.z) < 40 && S.pos.y - y < 40 && !RX.ghost && S.mode === 'playing') { S.hp.B = Math.max(0, S.hp.B - 12); flash(0.3); pop('BOMB BLAST · HULL ' + Math.round(S.hp.B) + '%', 'close'); } }
+  if (RX.bombs) for (let i = RX.bombs.length - 1; i >= 0; i--) { const b = RX.bombs[i]; b.t -= 1 / 60; if (b.t > 0) continue; RX.bombs.splice(i, 1); const y = world.surface(b.x, b.z); airburst(_v.set(b.x, y + 3, b.z)); if (Math.hypot(b.x - S.pos.x, b.z - S.pos.z) < 40 && S.pos.y - y < 40 && !RX.ghost && !inSafeBand() && S.mode === 'playing') { S.hp.B = Math.max(0, S.hp.B - 12); flash(0.3); pop('BOMB BLAST · HULL ' + Math.round(S.hp.B) + '%', 'close'); } }
 }
 // ---------- v35: WHITE RAIDER ICEHAWK ----------
 let icehawkMesh = null;
@@ -3539,6 +3557,7 @@ function aiAnalysis() {
     if (near) { const q = predict(S.steerS || 0, 0, 4, 16, 1.5); if (q.hit < Math.min(4, tti) && q.y - world.surface(q.x, q.z) < 1.6) { tti = q.hit; what = 'TERRAIN COLLISION'; } } }
   for (const e of RX.enemies) { if (e.dead) continue; const rx = e.p.x - S.pos.x, ry = e.p.y - S.pos.y, rz = e.p.z - S.pos.z, wx = e.v.x - vx, wy = e.v.y - vy, wz = e.v.z - vz, w2 = wx * wx + wy * wy + wz * wz; if (w2 < 1) continue; const t = -(rx * wx + ry * wy + rz * wz) / w2; if (t <= 0 || t > H || t >= tti) continue; const d = Math.hypot(rx + wx * t, ry + wy * t, rz + wz * t); if (d < 40) { tti = t; what = 'HOSTILE CLOSING'; } }
   for (const s of shotPool) { if (!s.on) continue; const rx = s.p.x - S.pos.x, ry = s.p.y - S.pos.y, rz = s.p.z - S.pos.z, wx = s.v.x - vx, wy = s.v.y - vy, wz = s.v.z - vz, w2 = wx * wx + wy * wy + wz * wz; const t = w2 > 1 ? -(rx * wx + ry * wy + rz * wz) / w2 : -1; if (t > 0 && t < tti && Math.hypot(rx + wx * t, ry + wy * t, rz + wz * t) < 25) { tti = t; what = 'MISSILE INBOUND'; } }
+  if (inSafeBand()) { tti = Infinity; what = null; } // SAFE ALTITUDE: above every obstacle, nothing to predict
   const box = $('aiBox'); box.classList.remove('hidden');
   if (tti === Infinity) { box.className = ''; box.textContent = 'AI ANALYSIS · ' + scanKm.toFixed(1) + ' KM / 10 s · CLEAR'; RX.aiLast = null; return '<b class="ok">AI · ' + scanKm.toFixed(1) + ' KM · PATH CLEAR</b>'; }
   // safest escape: evaluate clearance of each manoeuvre with the full flight model
@@ -3549,7 +3568,7 @@ function aiAnalysis() {
   return '<b class="bad">AI · ' + what + ' ' + tti.toFixed(1) + 's · ' + best + '</b>';
 }
 window.__game.forceCrash = () => crash();
-window.__game.v33 = { PFX, RO, rebaseOrigin, BASE, baseSeg, spawnIcehawk, rockDamage, CHIPPED, xform, get carRig() { return carRig; }, setCam, gsSupermode, setPhase, aiAnalysis, get cockpit() { return cockpit; }, get wingmen() { return wingmen; }, get carrier() { return carrier; }, get drone() { return drone; }, shotPool, misPool, DESTROYED };
+window.__game.v33 = { findContacts: () => findContacts(), PFX, RO, rebaseOrigin, BASE, baseSeg, spawnIcehawk, rockDamage, CHIPPED, xform, get carRig() { return carRig; }, setCam, gsSupermode, setPhase, aiAnalysis, get cockpit() { return cockpit; }, get wingmen() { return wingmen; }, get carrier() { return carrier; }, get drone() { return drone; }, shotPool, misPool, DESTROYED };
 window.__game.ready = true;
 if (TEST) {
   S.noCollide = !params.has('collide');

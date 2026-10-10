@@ -60,45 +60,56 @@ export class Controls {
         this.throttle = clamp(1 - (e.clientY - tb.top) / tb.height, 0, 1);
       } else if (this.inRollZone(e.clientY)) { // upper ~30% of the gameplay area: horizontal drag = roll angle
         for (const d of this.drags.values()) if (d.kind === 'roll') return;
-        this.drags.set(e.pointerId, { kind: 'roll', id: e.pointerId, x0: e.clientX, r0: this.rollCmd });
+        this.drags.set(e.pointerId, { kind: 'roll', id: e.pointerId, x0: e.clientX, y0: e.clientY, r0: this.rollCmd, px: e.clientX, py: e.clientY, pa: null, sweep: 0, len: 0, arcDone: false });
       } else {
         for (const d of this.drags.values()) if (d.kind === 'thr' || d.kind === 'swipe') return;
-        this.drags.set(e.pointerId, { kind: 'swipe', id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: this.throttle });
+        this.drags.set(e.pointerId, { kind: 'swipe', id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: this.throttle, px: e.clientX, py: e.clientY, pa: null, sweep: 0, len: 0, arcDone: false });
       }
       this.drag = this.drags.size ? [...this.drags.values()][0] : null;
     });
     el.addEventListener('pointermove', (e) => {
       const d = this.drags.get(e.pointerId); if (!d) return;
+      if ((d.kind === 'swipe' || d.kind === 'roll') && this.trackArc(d, e.clientX, e.clientY)) return; // arc gesture wins anywhere
+      if (d.arcDone) return;
       if (d.kind === 'roll') { this.rollCmd = clamp(d.r0 + (e.clientX - d.x0) / (innerWidth * 0.35) * Math.PI, -Math.PI, Math.PI); return; }
       if (d.kind === 'alt') this.setAlt(e.clientY, d);
       else if (d.kind === 'thr') this.throttle = clamp(1 - (e.clientY - d.barTop) / d.barH, 0, 1);
       else {
-        if (this.swipeSteer) { // proportional stick from the touch-start point: x = bank/turn, y = climb/dive
-          const R = Math.min(innerWidth, innerHeight) * 0.28, dz = 0.06;
-          const sh = (v) => { const a = Math.abs(v); return a < dz ? 0 : Math.sign(v) * Math.min((a - dz) / (1 - dz), 1); };
-          this.swT[0] = sh((e.clientX - d.x0) / R); this.swT[1] = sh((d.y0 - e.clientY) / R);
-        } else {
-          this.throttle = clamp(d.t0 + (d.y0 - e.clientY) / (innerHeight * 0.6), 0, 1);
-          if (!this.hasTilt) this.touchSteer = clamp((e.clientX - d.x0) / (innerWidth * 0.22), -1, 1);
-        }
+        // gameplay swipe = LEFT/RIGHT steering only (finger right-to-left = steer left), proportional to displacement; no pitch, no throttle
+        const R = Math.min(innerWidth, innerHeight) * 0.28, dz = 0.06;
+        const v = (e.clientX - d.x0) / R, av = Math.abs(v);
+        this.swT[0] = av < dz ? 0 : Math.sign(v) * Math.min((av - dz) / (1 - dz), 1); this.swT[1] = 0;
       }
     });
     const end = (e) => {
       const d = this.drags.get(e.pointerId); if (!d) return;
       this.drags.delete(e.pointerId);
       if (d.kind === 'roll') this.rollCmd = 0; // release: return to level
-      if (d.kind === 'alt') this.altStick = 0; // spring back to centre = level hold
+      if (d.kind === 'alt') this.altStick = 0; // target altitude stays where the slider was left
       if (d.kind === 'swipe') { this.touchSteer = 0; this.swT[0] = this.swT[1] = 0; if (this.swS) this.swS[0] = this.swS[1] = 0; } // spring back to neutral
       this.drag = this.drags.size ? [...this.drags.values()][0] : null;
     };
     el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
     el.addEventListener('wheel', (e) => { if (this.enabled) this.throttle = clamp(this.throttle - e.deltaY * 0.0008, 0, 1); }, { passive: true });
   }
+  // arc / semicircle gesture: accumulate the signed turning of the finger's direction of travel.
+  // >150 deg swept over a reasonably long path = 360 aileron roll in that direction (clockwise on screen = roll right).
+  trackArc(d, x, y) {
+    const dx = x - d.px, dy = y - d.py, l = Math.hypot(dx, dy); if (l < 6) return false;
+    const a = Math.atan2(dy, dx);
+    if (d.pa !== null) { let da = a - d.pa; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI; if (Math.abs(da) < 1.4) d.sweep += da; }
+    d.pa = a; d.px = x; d.py = y; d.len += l;
+    if (!d.arcDone && Math.abs(d.sweep) > 150 * Math.PI / 180 && d.len > Math.min(innerWidth, innerHeight) * 0.3) {
+      d.arcDone = true; this.swT[0] = 0; this.touchSteer = 0; if (this.swS) this.swS[0] = 0; if (d.kind === 'roll') this.rollCmd = 0;
+      if (this.onArc) this.onArc(d.sweep > 0 ? 1 : -1);
+      return true;
+    }
+    return d.arcDone;
+  }
   inRollZone(y) { const top = this.hudTop || 96, h = innerHeight - top; return y > top && y < top + h * 0.3; }
   // centre = 0 (level), top = +1 (full climb), bottom = -1 (full dive); small dead-zone around centre
-  setAlt(y, d) {
-    const v = clamp(1 - 2 * (y - d.top) / d.h, -1, 1), a = Math.abs(v);
-    this.altStick = a < 0.08 ? 0 : Math.sign(v) * (a - 0.08) / 0.92;
+  setAlt(y, d) { // slider position maps bottom = 0 m (ground, terrain-relative) .. top = 500 m
+    this.altTarget = clamp(1 - (y - d.top) / d.h, 0, 1) * 500; this.altStick = 0;
   }
 
   // must be called synchronously inside a user gesture (iOS)
@@ -172,14 +183,15 @@ export class Controls {
       if (K.KeyS || K.ControlLeft) this.throttle = clamp(this.throttle - dt * 0.55, 0, 1);
     }
     this.tiltSteer = steer; this.tiltPitch = pitch;
-    if (this.swipeSteer || this.swS) { // smoothed swipe stick, adds on top of tilt
+    { // smoothed swipe stick (always on): left/right only
       const k = 1 - Math.exp(-dt * 40); this.swS = this.swS || [0, 0];
       this.swS[0] += (this.swT[0] - this.swS[0]) * k; this.swS[1] += (this.swT[1] - this.swS[1]) * k;
       const held = this.drags && [...this.drags.values()].some((q) => q.kind === 'swipe');
-      if (held && this.swipeSteer) { steer = this.swS[0]; pitch = this.swS[1]; } else { steer += this.swS[0]; pitch += this.swS[1]; }
+      if (held) steer = this.swS[0]; else steer += this.swS[0]; // swipes never pitch
       this.swipeHeld = !!held;
     }
     this.steer = clamp(steer + this._kx + this.touchSteer, -1, 1);
-    this.pitch = clamp(pitch + this._ky + (this.altStick || 0), -1, 1);
+    if (Math.abs(this._ky) > 0.05) this.altTarget = clamp((this.altTarget ?? 30) + this._ky * 160 * dt, 0, 500); // keyboard up/down moves the altitude target
+    this.pitch = clamp(pitch, -1, 1);
   }
 }

@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=41">
+<link rel="stylesheet" href="style.css?v=42">
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
 </head>
 <body>
@@ -43,7 +43,7 @@
     <div id="comboBox"><span class="lbl">COMBO</span> <span id="combo">x1.0</span><div id="comboTrack"><div id="comboBar"></div></div></div>
     <div class="btns"><button id="apBtn" class="ui hb">AUTO</button><button id="safeBtn" class="ui hb">SAFE</button><button id="recal" class="ui hb" aria-label="Recalibrate tilt">⟲ LEVEL</button><button id="rxTab" class="ui hb" aria-label="More modes">☰ MODES</button></div>
   </div>
-  <div id="altBar"><div id="altMid"></div><div id="altFill"></div><div id="altKnob"></div><div id="altLbl">ALT</div><div id="altUp">▲</div><div id="altDn">▼</div><div id="altPct">LEVEL</div></div>
+  <div id="altBar"><div id="altSafe"></div><div id="altMid"></div><div id="altFill"></div><div id="altKnob"></div><div id="altLbl">ALT</div><div id="altUp">▲</div><div id="altDn">▼</div><div id="altPct">LEVEL</div></div>
   <div id="lockRet"><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i><b>LOCK</b><span></span><em id="misSpd"></em></div>
   <button id="fireBtn" class="ui" aria-label="Fire missile"><span>FIRE</span><div id="ammoPips"><i></i><i></i><i></i><i></i><i></i><i></i></div></button>
   <div id="thrBar"><div id="thrFill"></div><div id="thrMach"></div><div id="thrLbl">THR</div><div id="thrPct">35%</div></div>
@@ -130,8 +130,9 @@
 </div></div>
 <div id="aiBox" class="hidden"></div>
 <div id="fzBonus" class="hidden"></div>
+<div id="safeAlt" class="hidden">SAFE ALTITUDE</div>
 <div id="rotate" class="hidden">↻ Landscape recommended</div>
 <div id="err" class="hidden"></div>
-<script type="module" src="js/main.js?v=41"></script>
+<script type="module" src="js/main.js?v=42"></script>
 </body>
 </html>

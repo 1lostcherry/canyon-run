@@ -75,7 +75,12 @@ export class World {
   mtnAt(z) { const d = -z; if (!this.mtns) return 0; for (const [a, b] of this.mtns) if (d > a - 3000 && d < b + 3000) return Math.min(1, (d - a + 3000) / 3000, (b + 3000 - d) / 3000); return 0; }
   biomeMain(z) { const B = this.biomeAt(z); return B.t > 0.5 ? B.b : B.a; }
 
-  height(x, z) {
+  height(x, z) { // v42: terrain never rises more than ~450 m above the route's valley floor
+    const h = this.height0(x, z);
+    if (z !== this._fz) { this._fz = z; this._fh = Math.max(this.height0(this.pathX(z), z), 0); }
+    const cap = this._fh + 440; return h <= cap - 40 ? h : cap - 40 + 40 * (1 - Math.exp(-(h - cap + 40) / 40));
+  }
+  height0(x, z) {
     const B = this.biomeAt(z);
     const a = B.a, b = B.b, t = B.t;
     if (t <= 0 || a === b) return this.bh(a, x, z);

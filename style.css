@@ -281,3 +281,10 @@ body.ui-off #trayTab { display: none; }
 
 #fzBonus { position: absolute; left: 50%; transform: translateX(-50%); top: calc(var(--sat) + 122px); z-index: 25; font: 900 13px system-ui; letter-spacing: 1.5px; color: #dff6ff; background: rgba(40,140,220,0.45); padding: 4px 12px; border-radius: 10px; pointer-events: none; }
 #fzBonus.hidden { display: none; }
+
+#altSafe { position: absolute; left: 0; right: 0; top: 0; height: 10%; background: linear-gradient(180deg, rgba(80,230,170,0.55), rgba(80,170,255,0.35)); border-bottom: 1px solid rgba(140,255,210,0.8); }
+#altBar.safe { border-color: rgba(120,255,200,0.95); box-shadow: 0 0 14px rgba(90,240,190,0.5); }
+#safeAlt { position: absolute; left: 50%; transform: translateX(-50%); top: calc(var(--sat) + 150px); z-index: 25; font: 900 13px system-ui; letter-spacing: 2px; color: #eafff6; background: rgba(30,170,120,0.5); padding: 4px 12px; border-radius: 10px; pointer-events: none; }
+#safeAlt.hidden { display: none; }
+#altFill { top: auto !important; bottom: 0; margin-top: 0 !important; }
+#altSafe { z-index: 2; opacity: 0.9; } #altFill { opacity: 0.75; } #altKnob { z-index: 3; }
