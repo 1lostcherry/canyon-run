@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=44';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=44';
-import { loadAssets } from './assets.js?v=44';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=45';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=45';
+import { loadAssets } from './assets.js?v=45';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=44';
-import { GpuDust } from './gpudust.js?v=44';
-import { PostFX } from './postfx.js?v=44';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=44';
-import { GameAudio } from './audio.js?v=44';
-import { Controls } from './input.js?v=44';
+import { Grass } from './grass.js?v=45';
+import { GpuDust } from './gpudust.js?v=45';
+import { PostFX } from './postfx.js?v=45';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=45';
+import { GameAudio } from './audio.js?v=45';
+import { Controls } from './input.js?v=45';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -566,9 +566,9 @@ function startGame() {
   $('start').classList.add('hidden'); $('crash').classList.add('hidden'); $('hud').classList.remove('hidden');
   S.hintUntil = performance.now() + 4000;
   const coarse = matchMedia('(pointer: coarse)').matches;
-  S.tut = localStorage.getItem('canyon.tut') ? [] : (coarse ? [[0.3, 'Tilt left / right to bank and steer'], [4.5, 'Tilt toward / away from you to climb / dive'], [8.7, 'Swipe up on the right to throttle up · swipe down to slow'], [12.9, 'Skim low & shave past rocks for combos'], [17.1, 'Double-tap = barrel roll · AUTO / SAFE buttons if you need help']]
+  S.tut = localStorage.getItem('canyon.tut') ? [] : (coarse ? [[0.3, 'Drag left / right to steer · finger height sets altitude'], [4.5, 'Finger low = skim the ground · high = 500 m safe band'], [8.7, 'Right slider = throttle · draw a half-circle to roll'], [12.9, 'Skim low & shave past rocks for combos'], [17.1, 'AUTO / SAFE / GOD buttons if you need help']]
     : [[0.3, 'A / D or ← / → to steer'], [4.5, '↑ / ↓ to climb / dive'], [8.7, 'W / S, drag or scroll to throttle'], [12.9, 'Skim low & shave past rocks for combos'], [17.1, 'R = barrel roll · AUTO / SAFE buttons if you need help']]);
-  setTimeout(() => { if (!controls.hasTilt && matchMedia('(pointer: coarse)').matches) $('hint').textContent = 'Drag left / right to steer · up / down for throttle'; }, 1500);
+  setTimeout(() => { if (!controls.hasTilt && matchMedia('(pointer: coarse)').matches) $('hint').textContent = 'Drag left / right to steer · finger height = altitude'; }, 1500);
 }
 $('start').addEventListener('click', startGame);
 $('crash').addEventListener('click', () => { if (S.crashT > 0.5) startGame(); });
@@ -943,13 +943,13 @@ function updateFlight(dt) {
     if (S.agl < 2) { if (!S.fallSeq) S.crashCause = 'ENGINE FAILURE · 7 HITS'; crash(); }
     return { thr: 0, spdN: spdNf(S.speed) };
   }
-  let steer = controls.steer, pitchIn = altHoldInput(); S.holdDirect = S.mode === 'playing' && !S.autopilot && !rxForceAP() && !safeMode && !RX.smart; // altitude comes from the left slider target (0-500 m AGL)
+  let steer = controls.steer, pitchIn = altHoldInput(); S.holdDirect = S.mode === 'playing' && !S.autopilot && !rxForceAP(); // altitude comes from the left slider target (0-500 m AGL)
   gatherObstacles();
   if (S.mode === 'playing' && S.autopilot && !TEST && !S.apManual) { S.apOverT = (Math.abs(controls.steer) > 0.85 || Math.abs(controls.pitch) > 0.85) ? (S.apOverT || 0) + dt : 0; if (S.apOverT > 0.5) setAutopilot(false); }
   S.apManual = S.mode === 'playing' && S.autopilot && safeMode && !rxForceAP();
   if (S.apManual) { autopilotInput(S.apDt || dt); const a = safeAssist(steer, pitchIn, dt); steer = a.steer; pitchIn = a.pitch; }
   else if (S.mode === 'attract' || S.autopilot || rxForceAP()) { const a = S.apSub ? S.apLast : autopilotInput(S.apDt || dt); S.apLast = a; steer = a.steer; pitchIn = a.pitch; }
-  else if (S.mode === 'playing' && (safeMode || RX.smart)) { const a = safeAssist(steer, pitchIn, dt); steer = a.steer; pitchIn = a.pitch; }
+  else if (S.mode === 'playing' && (safeMode || RX.smart)) { const a = safeAssist(steer, pitchIn, dt); S.holdDirect = Math.abs(a.pitch - pitchIn) < 0.05; steer = a.steer; pitchIn = a.pitch; } // assist only takes over pitch when it is actively avoiding
   const thr = S.mode === 'attract' ? Math.min(0.38, AP.thrCap) : (S.autopilot || rxForceAP()) ? Math.min(controls.throttle, AP.thrCap) : controls.throttle;
   if (S.hp && S.mode === 'playing') steer += ((100 - S.hp.R) - (100 - S.hp.L)) * 0.0028;
   steer += RX.jolt;
@@ -971,10 +971,10 @@ function updateFlight(dt) {
   // pitch
   let ptarget = pitchIn * 0.30, prate = 5, vmax = 130;
   if (S.holdDirect) { const sp = Math.max(S.speed, 20); vmax = clamp(90 + sp * 0.25, 90, 3000);
-    const g0 = world.surface(S.pos.x, S.pos.z), L = clamp(sp * 0.3, 30, 1500), dx = -Math.sin(S.heading), dz = -Math.cos(S.heading);
+    const g0 = world.surface(S.pos.x, S.pos.z), L = clamp(sp * 0.3, 30, 700), dx = -Math.sin(S.heading), dz = -Math.cos(S.heading);
     let gA = -1e9; for (const k of [0.5, 1, 2, 3]) gA = Math.max(gA, world.surface(S.pos.x + dx * L * k, S.pos.z + dz * L * k) - (k - 1) * 0); // anticipate rising ground over ~1 s
     const gN = world.surface(S.pos.x + dx * L, S.pos.z + dz * L);
-    const ff = clamp((Math.max(gN, gA - 40) - g0) / L * sp, -vmax, vmax), T = controls.altTarget ?? 30;
+    const ff = clamp((Math.max(gN, gA - 40 - Math.max(0, (controls.altTarget ?? 30) - 60)) - g0) / L * sp, -vmax, vmax), T = controls.altTarget ?? 30;
     const vyT = clamp(ff * 0.9 + (T - S.agl) * 2.0, -vmax, vmax); S.vyT = vyT;
     ptarget = Math.asin(clamp(vyT / sp, -0.75, 0.75)); prate = 12; }
   S.pitch = damp(S.pitch, ptarget, prate, dt);

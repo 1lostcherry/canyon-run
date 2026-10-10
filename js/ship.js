@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeRng } from './terrain.js?v=44';
+import { makeRng } from './terrain.js?v=45';
 
 function taperBox(w, h, l, frontW = 0.5, frontH = 0.5, taperStart = 0.2, segs = 6) {
   const g = new THREE.BoxGeometry(w, h, l, 1, 1, segs);

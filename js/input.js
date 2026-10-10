@@ -195,12 +195,12 @@ export class Controls {
     { // smoothed swipe stick (always on): left/right only
       const k = 1 - Math.exp(-dt * 40); this.swS = this.swS || [0, 0];
       this.swS[0] += (this.swT[0] - this.swS[0]) * k; this.swS[1] += (this.swT[1] - this.swS[1]) * k;
-      const held = this.drags && [...this.drags.values()].some((q) => q.kind === 'swipe');
+      const dv = this.drags ? [...this.drags.values()] : [], held = dv.some((q) => q.kind === 'swipe') && !dv.some((q) => q.kind === 'alt'); // the alt slider wins while held
       if (held) steer = this.swS[0]; else steer += this.swS[0]; // swipes never pitch
       this.swipeHeld = !!held;
     }
     this.steer = clamp(steer + this._kx + this.touchSteer, -1, 1);
-    { const held = this.drags && [...this.drags.values()].some((q) => q.kind === 'swipe');
+    { const dv = this.drags ? [...this.drags.values()] : [], held = dv.some((q) => q.kind === 'swipe') && !dv.some((q) => q.kind === 'alt'); // the alt slider wins while held
       if (this.fingerHeight && held && this.fingerT !== null) this.altTarget = (this.altTarget ?? 30) + (this.fingerT - (this.altTarget ?? 30)) * (1 - Math.exp(-dt / 0.04)); } // ~0.12 s blend, last target kept on release
     if (Math.abs(this._ky) > 0.05) this.altTarget = clamp((this.altTarget ?? 30) + this._ky * 160 * dt, 0, 500); // keyboard up/down moves the altitude target
     this.pitch = clamp(pitch, -1, 1);
