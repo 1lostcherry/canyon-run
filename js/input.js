@@ -46,7 +46,7 @@ export class Controls {
   barHit(x, id, padIn, padOut) { const b = document.getElementById(id).getBoundingClientRect(); return b.width > 0 && x > b.left - padIn && x < b.right + padOut ? b : null; }
   onSlider(x) { return !!(this.barHit(x, 'thrBar', 50, 40) || this.barHit(x, 'altBar', 40, 50)); }
   attachPointer(el, isUI) {
-    this.drags = new Map(); this.altStick = 0;
+    this.drags = new Map(); this.altStick = 0; this.fingerHeight = localStorage.getItem('canyon.fingerH') !== '0'; this.fingerT = null;
     el.addEventListener('pointerdown', (e) => {
       if (!this.enabled || isUI(e.target)) return;
       const tb = this.barHit(e.clientX, 'thrBar', 50, 40), ab = !tb && this.barHit(e.clientX, 'altBar', 40, 50);
@@ -58,11 +58,12 @@ export class Controls {
         for (const d of this.drags.values()) if (d.kind === 'thr' || d.kind === 'swipe') return;
         this.drags.set(e.pointerId, { kind: 'thr', id: e.pointerId, barTop: tb.top, barH: tb.height });
         this.throttle = clamp(1 - (e.clientY - tb.top) / tb.height, 0, 1);
-      } else if (this.inRollZone(e.clientY)) { // upper ~30% of the gameplay area: horizontal drag = roll angle
+      } else if (!this.fingerHeight && this.inRollZone(e.clientY)) { // upper ~30% of the gameplay area: horizontal drag = roll angle
         for (const d of this.drags.values()) if (d.kind === 'roll') return;
         this.drags.set(e.pointerId, { kind: 'roll', id: e.pointerId, x0: e.clientX, y0: e.clientY, r0: this.rollCmd, px: e.clientX, py: e.clientY, pa: null, sweep: 0, len: 0, arcDone: false });
       } else {
         for (const d of this.drags.values()) if (d.kind === 'thr' || d.kind === 'swipe') return;
+        if (this.fingerHeight) this.fingerT = Controls.fingerMap(e.clientY);
         this.drags.set(e.pointerId, { kind: 'swipe', id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: this.throttle, px: e.clientX, py: e.clientY, pa: null, sweep: 0, len: 0, arcDone: false });
       }
       this.drag = this.drags.size ? [...this.drags.values()][0] : null;
@@ -75,6 +76,7 @@ export class Controls {
       if (d.kind === 'alt') this.setAlt(e.clientY, d);
       else if (d.kind === 'thr') this.throttle = clamp(1 - (e.clientY - d.barTop) / d.barH, 0, 1);
       else {
+        if (this.fingerHeight) this.fingerT = Controls.fingerMap(e.clientY); // absolute finger height -> target altitude
         // gameplay swipe = LEFT/RIGHT steering only (finger right-to-left = steer left), proportional to displacement; no pitch, no throttle
         const R = Math.min(innerWidth, innerHeight) * 0.28, dz = 0.06;
         const v = (e.clientX - d.x0) / R, av = Math.abs(v);
@@ -105,6 +107,13 @@ export class Controls {
       return true;
     }
     return d.arcDone;
+  }
+  // finger SCREEN height -> target altitude: bottom 0 m, midpoint 400 m (80%), 70% height 500 m, above that 500 m
+  static fingerMap(y) {
+    const f = Math.min(Math.max(1 - y / innerHeight, 0), 1);
+    if (f <= 0.5) { const u = f / 0.5; return 400 * u; }
+    if (f >= 0.7) return 500;
+    const u = (f - 0.5) / 0.2; return 400 + 100 * (u * u * (3 - 2 * u)); // rapid 80% -> 100%
   }
   inRollZone(y) { const top = this.hudTop || 96, h = innerHeight - top; return y > top && y < top + h * 0.3; }
   // centre = 0 (level), top = +1 (full climb), bottom = -1 (full dive); small dead-zone around centre
@@ -191,6 +200,8 @@ export class Controls {
       this.swipeHeld = !!held;
     }
     this.steer = clamp(steer + this._kx + this.touchSteer, -1, 1);
+    { const held = this.drags && [...this.drags.values()].some((q) => q.kind === 'swipe');
+      if (this.fingerHeight && held && this.fingerT !== null) this.altTarget = (this.altTarget ?? 30) + (this.fingerT - (this.altTarget ?? 30)) * (1 - Math.exp(-dt / 0.1)); } // ~0.3 s blend, last target kept on release
     if (Math.abs(this._ky) > 0.05) this.altTarget = clamp((this.altTarget ?? 30) + this._ky * 160 * dt, 0, 500); // keyboard up/down moves the altitude target
     this.pitch = clamp(pitch, -1, 1);
   }

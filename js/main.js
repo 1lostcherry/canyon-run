@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=42';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=42';
-import { loadAssets } from './assets.js?v=42';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=43';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=43';
+import { loadAssets } from './assets.js?v=43';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=42';
-import { GpuDust } from './gpudust.js?v=42';
-import { PostFX } from './postfx.js?v=42';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=42';
-import { GameAudio } from './audio.js?v=42';
-import { Controls } from './input.js?v=42';
+import { Grass } from './grass.js?v=43';
+import { GpuDust } from './gpudust.js?v=43';
+import { PostFX } from './postfx.js?v=43';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=43';
+import { GameAudio } from './audio.js?v=43';
+import { Controls } from './input.js?v=43';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -579,6 +579,7 @@ addEventListener('keydown', (e) => {
 
 function crash() {
   if (S.mode !== 'playing') return;
+  if (RX.god) { S.engineFail = false; S.fallSeq = false; S.crashCause = ''; S.hp.L = S.hp.R = S.hp.B = 100; return; } // GOD MODE: nothing ends the run
   if (!RX.xsurv && !S.engineFail && !S.car && !RX.blast && S.agl > 6 && !params.has('instantcrash')) { // unprotected impact: airframe breaks up and falls before the result screen
     S.engineFail = true; S.fallSeq = true; S.fallV = 0; flash(0.6); S.shake = 2; audio.explode(); airburst(S.pos.clone());
     pop((S.crashCause || 'IMPACT') + ' · GOING DOWN', 'close'); return;
@@ -1045,6 +1046,7 @@ function resolveCollisions(dt) {
     if (o.dead) continue; const dx = o.x - S.pos.x, dz = o.z - S.pos.z, R = targetRadius(o) + 10;
     if (dx * dx + dz * dz < R * R && S.pos.y < (o.y || 0) + (o.h || o.r * 2) + 8) { _v.set(o.x, S.pos.y, o.z); destroyTarget(o, _v); S.superCuts = (S.superCuts || 0) + 1; }
   }
+  if (RX.god && S.mode === 'playing') return godPlow(dt);
   if (S.land) return false;
   if (rxSlabCheck()) return true;
   if (inSafeBand()) { S.safeFrames = (S.safeFrames || 0) + 1; return false; } // SAFE ALTITUDE: above every obstacle
@@ -1223,7 +1225,7 @@ function updateScore(dt) {
     if (S.skimAcc > 1.4) { S.skimAcc = 0; addCombo(wall && S.agl >= 14 ? 'WALL SKIM' : 'SKIM', 60, 'skim'); }
   } else { S.skimT = 0; S.skimAcc = Math.max(0, S.skimAcc - dt * 2); }
   hud.skim.classList.toggle('on', skimming);
-  S.score += dd * speedMult * comboMult() * (skimming ? 1.5 : 1) * (1 + 0.5 * (S.wx ? S.wx.anyK : 0)) * (S.autopilot ? 0.25 : safeMode ? 0.6 : 1) * (RX.ghost ? 0.3 : 1);
+  S.score += dd * speedMult * comboMult() * (skimming ? 1.5 : 1) * (1 + 0.5 * (S.wx ? S.wx.anyK : 0)) * (S.autopilot ? 0.25 : safeMode ? 0.6 : 1) * (RX.ghost ? 0.3 : 1) * (RX.god ? 0.3 : 1);
   if (S.combo > 0) {
     S.comboT -= dt;
     if (S.comboT <= 0) { if (S.combo >= 3) pop('COMBO x' + comboMult().toFixed(1) + ' BANKED', 'banked'); S.combo = 0; }
@@ -2548,6 +2550,7 @@ function updateHostiles(dt) {
     const sx = s.p.x - ox, sy = s.p.y - oy, sz = s.p.z - oz, sl = sx * sx + sy * sy + sz * sz;
     let u = sl > 0 ? ((S.pos.x - ox) * sx + (S.pos.y - oy) * sy + (S.pos.z - oz) * sz) / sl : 0; u = clamp(u, 0, 1);
     const dd = Math.hypot(ox + sx * u - S.pos.x, oy + sy * u - S.pos.y, oz + sz * u - S.pos.z);
+    if (dd < 7 && S.mode === 'playing' && !RX.ghost && !inSafeBand() && RX.god) { s.on = false; s.s.visible = false; airburst(s.p.clone()); S.godKills = (S.godKills || 0) + 1; continue; }
     if (dd < 7 && S.mode === 'playing' && !RX.ghost && !inSafeBand()) {
       s.on = false; s.s.visible = false;
       const floor = (S.autopilot || rxForceAP() || safeMode) ? 15 : 0;
@@ -2645,6 +2648,7 @@ function geyserForces(dt) { // updraft + turbulence while inside a plume
 function boltNear(x0, z0) { // lightning that strikes near the ship jolts the controls
   if (S.mode !== 'playing') return;
   if (Math.hypot(x0 - S.pos.x, z0 - S.pos.z) > 320 || RX.phase > 0) return;
+  if (RX.god) { flash(0.4); return; } // GOD MODE: no control loss / damage
   RX.joltT = 2 + Math.random() * 2; RX.joltDir = Math.random() < 0.5 ? -1 : 1; S.shake = Math.max(S.shake, 1.6); flash(0.6);
   const floor = (S.autopilot || rxForceAP() || safeMode) ? 20 : 1; S.hp.B = Math.max(floor, S.hp.B - 6); S.noContactT = 0;
   pop('⚡ LIGHTNING STRIKE · CONTROLS JOLTED', 'close'); rxSay('Lightning strike.', 'bolt');
@@ -2738,6 +2742,7 @@ function rxUpdate(dt, rdt) { // dt = game (possibly slow-mo) time, rdt = real ti
   RX.jolt = RX.joltT > 0 ? RX.joltDir * 0.6 * Math.min(RX.joltT / 0.7, 1) * (S.autopilot || rxForceAP() ? 0.2 : 1) + Math.sin(S.t * 60) * 0.15 * RX.joltT : 0;
   RX.gsupCool = Math.max(0, RX.gsupCool - dt);
   if (RX.fzBonus > 0) { RX.fzBonus = Math.max(0, RX.fzBonus - rdt); const el = $('fzBonus'); el.classList.toggle('hidden', !(RX.fzBonus > 0)); el.textContent = '❄ FREEZE BONUS ' + RX.fzBonus.toFixed(1) + ' s'; } // real time: slow-mo does not extend it
+  if (RX.god) { S.hp.L = S.hp.R = S.hp.B = 100; S.misHits = 0; S.engineFail = false; RX.joltT = 0; }
   updateBase(); updateBirdsFossils(dt); updatePebbles(); grass.U.tallK.value = damp(grass.U.tallK.value, RX.iceK > 0.5 ? 0 : tallGrassK(S.dist), 2, dt);
   updateHazards(dt); updateWingmen(dt); updateEscorts(dt); updateFreeze(dt); updateBlast(dt); updateHostiles(dt); updateG(dt);
   if (RX.instDirty) { RX.instDirty = false; rebuildInstances(); }
@@ -2798,6 +2803,8 @@ function rxMenuSync() {
   set('mxHelp', RX.g47h ? 'G47 HELPERS · ON' : 'G47 HELPERS · OFF', RX.g47h);
   set('mxG47fz', RX.g47fz ? 'G47 FREEZE MSL · ON' : 'G47 FREEZE MSL · OFF', RX.g47fz);
   set('mxSmartM', RX.smartM ? 'SMART MISSILES · ON' : 'SMART MISSILES · OFF', RX.smartM);
+  set('mxGod', RX.god ? 'GOD MODE · ON' : 'GOD MODE · OFF', !!RX.god);
+  set('mxFingerH', controls.fingerHeight ? 'FINGER HEIGHT · ON' : 'FINGER HEIGHT · OFF', !!controls.fingerHeight);
   set('mxSuper', RX.super ? 'SUPERSAFE · ON' : 'SUPERSAFE · OFF', RX.super);
   set('mxX', RX.xsurv ? 'X SURVIVAL · ON' : 'X SURVIVAL · OFF', RX.xsurv);
   set('mxPhase', ['PHASE · OFF', 'PHASE · ME ONLY', 'PHASE · ALL FRIENDLY'][RX.phase], RX.phase > 0);
@@ -2920,6 +2927,7 @@ const RX_ACT = {
   mxCarrier: () => setCarrier(!RX.carrier), mxDrone: () => setDrone(!RX.drone), mxPip: () => cyclePip(),
   mxSwipe: () => { controls.swipeSteer = !controls.swipeSteer; localStorage.setItem('canyon.swipe', controls.swipeSteer ? '1' : '0'); pop(controls.swipeSteer ? 'SWIPE STEERING ON · DRAG TO FLY' : 'SWIPE STEERING OFF', 'banked'); rxMenuSync(); },
   mxAuto: () => { setAutopilot(!S.autopilot); rxMenuSync(); }, mxSafe: () => { setSafe(!safeMode); rxMenuSync(); }, mxFire: () => fireMissile(),
+  mxGod: () => setGod(!RX.god), mxFingerH: () => { controls.fingerHeight = !controls.fingerHeight; localStorage.setItem('canyon.fingerH', controls.fingerHeight ? '1' : '0'); pop('FINGER HEIGHT ' + (controls.fingerHeight ? 'ON' : 'OFF'), 'unlock'); rxMenuSync(); },
   mxSuper: () => { RX.super = !RX.super; pop(RX.super ? 'BLACKHAWK SUPERSAFE · CUTS THROUGH OBSTACLES' : 'SUPERSAFE OFF', 'unlock'); rxMenuSync(); },
   mxX: () => { RX.xsurv = !RX.xsurv; pop(RX.xsurv ? 'X SURVIVAL · WATER & ROCK IMPACTS ABSORBED' : 'X SURVIVAL OFF', 'unlock'); rxMenuSync(); },
   mxPhase: () => setPhase((RX.phase + 1) % 3), mxSmart: () => { RX.smart = !RX.smart; pop(RX.smart ? 'SMART ROCK AVOIDANCE ON' : 'SMART ROCK AVOIDANCE OFF', 'banked'); rxMenuSync(); },
@@ -2942,7 +2950,7 @@ $('rxScrim').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stop
 $('voiceChip').addEventListener('click', (e) => { e.stopPropagation(); setVoice(!RX.voice); });
 addEventListener('keydown', (e) => {
   if (e.repeat || S.mode !== 'playing') return;
-  const k = { KeyG: 'mxWing', KeyQ: 'mxWave', KeyC: 'mxCam', KeyV: 'mxWar', KeyU: 'mxUltra', KeyB: 'mxBlast', KeyL: 'mxLand', KeyP: 'mxGhost', KeyI: 'mxScan', KeyO: 'mxVoice', KeyK: 'mxCarrier', KeyJ: 'mxDrone', KeyN: 'mxPip', KeyH: 'mxSwipe', KeyY: 'rxCardYes', KeyT: 'mxXform', KeyM: null }[e.code];
+  const k = { KeyJ: 'mxWing', KeyQ: 'mxWave', KeyC: 'mxCam', KeyV: 'mxWar', KeyU: 'mxUltra', KeyB: 'mxBlast', KeyL: 'mxLand', KeyP: 'mxGhost', KeyI: 'mxScan', KeyO: 'mxVoice', KeyK: 'mxCarrier', KeyJ: 'mxDrone', KeyN: 'mxPip', KeyH: 'mxSwipe', KeyY: 'rxCardYes', KeyT: 'mxXform', KeyG: 'mxGod', KeyM: null }[e.code];
   if (e.code === 'KeyM') rxMenu(); else if (e.code === 'Escape') { if (RX.ride) endRide(); else rxMenu(false); } else if (k) RX_ACT[k]();
 });
 rxMenuSync();
@@ -3241,7 +3249,7 @@ function baseThreats(A, d) {
     for (let k = 0; k < 6; k++) { const z = -(at + k * 70), x = world.pathX(z) + (Math.random() - 0.5) * 80; RX.bombs.push({ x, z, t: (at + k * 70 - S.dist) / Math.max(S.speed, 1) - 0.3 }); }
     pop('⚠ BOMBING RUN AHEAD', 'close');
   }
-  if (RX.bombs) for (let i = RX.bombs.length - 1; i >= 0; i--) { const b = RX.bombs[i]; b.t -= 1 / 60; if (b.t > 0) continue; RX.bombs.splice(i, 1); const y = world.surface(b.x, b.z); airburst(_v.set(b.x, y + 3, b.z)); if (Math.hypot(b.x - S.pos.x, b.z - S.pos.z) < 40 && S.pos.y - y < 40 && !RX.ghost && !inSafeBand() && S.mode === 'playing') { S.hp.B = Math.max(0, S.hp.B - 12); flash(0.3); pop('BOMB BLAST · HULL ' + Math.round(S.hp.B) + '%', 'close'); } }
+  if (RX.bombs) for (let i = RX.bombs.length - 1; i >= 0; i--) { const b = RX.bombs[i]; b.t -= 1 / 60; if (b.t > 0) continue; RX.bombs.splice(i, 1); const y = world.surface(b.x, b.z); airburst(_v.set(b.x, y + 3, b.z)); if (Math.hypot(b.x - S.pos.x, b.z - S.pos.z) < 40 && S.pos.y - y < 40 && !RX.ghost && !inSafeBand() && !RX.god && S.mode === 'playing') { S.hp.B = Math.max(0, S.hp.B - 12); flash(0.3); pop('BOMB BLAST · HULL ' + Math.round(S.hp.B) + '%', 'close'); } }
 }
 // ---------- v35: WHITE RAIDER ICEHAWK ----------
 let icehawkMesh = null;
@@ -3308,6 +3316,24 @@ function updatePebbles() {
     if (budget <= 0) break; }
   if (dirty) pebbles.instanceMatrix.needsUpdate = true;
 }
+
+// ---------- v43: GOD MODE ----------
+function godPlow(dt) { // everything the jet touches shatters; terrain bumps push the jet up smoothly; no damage, no death
+  S.hp.L = S.hp.R = S.hp.B = 100; S.misHits = 0; S.engineFail = false; RX.joltT = 0;
+  for (const o of nearObs) {
+    if (o.dead) continue; const dx = o.x - S.pos.x, dz = o.z - S.pos.z, R = targetRadius(o) + 9;
+    if (dx * dx + dz * dz > R * R) continue;
+    const top = (o.y || 0) + (o.type === 'boulder' ? o.r * 1.6 : (o.h || o.r * 2) + 4); if (S.pos.y > top + 6) continue;
+    _v.set(o.x, clamp(S.pos.y, o.y || 0, top), o.z);
+    if (RX.ice) shatterIce(o); else destroyTarget(o, _v); // ice fracture in the Ice Age; persistence via DESTROYED on chunk unload
+    o.dead = true; S.godKills = (S.godKills || 0) + 1; S.shake = Math.max(S.shake, 0.35);
+  }
+  for (const e of RX.enemies) if (!e.dead && e.p.distanceTo(S.pos) < 22) { e.hp = 1; damageJet(e, 99); S.godKills = (S.godKills || 0) + 1; }
+  const g = world.surface(S.pos.x, S.pos.z) + 3.5; // plough over terrain: soft push instead of a crash
+  if (S.pos.y < g) { S.pos.y += (g - S.pos.y) * Math.min(1, dt * 18); if (S.pos.y < g - 2) S.pos.y = g - 2; S.pitch = Math.max(S.pitch, 0.05); ship.position.copy(S.pos); if (Math.random() < 0.5) dust.spawn(S.pos.x, g, S.pos.z, S.vel.x * 0.3, 6, S.vel.z * 0.3, 1.5, 3, 14, 0.5, ...E.dust, 1, 0.5); }
+  return false;
+}
+function setGod(on) { RX.god = on; pop(on ? 'GOD MODE · INVULNERABLE · SCORE ×0.3' : 'GOD MODE OFF', 'unlock'); $('godBadge').classList.toggle('hidden', !on); rxMenuSync(); }
 // ---------- v34: TRANSFORM · Blackhawk <-> armored ground vehicle ----------
 let carRig = null;
 function buildCarRig() {
@@ -3568,7 +3594,7 @@ function aiAnalysis() {
   return '<b class="bad">AI · ' + what + ' ' + tti.toFixed(1) + 's · ' + best + '</b>';
 }
 window.__game.forceCrash = () => crash();
-window.__game.v33 = { findContacts: () => findContacts(), PFX, RO, rebaseOrigin, BASE, baseSeg, spawnIcehawk, rockDamage, CHIPPED, xform, get carRig() { return carRig; }, setCam, gsSupermode, setPhase, aiAnalysis, get cockpit() { return cockpit; }, get wingmen() { return wingmen; }, get carrier() { return carrier; }, get drone() { return drone; }, shotPool, misPool, DESTROYED };
+window.__game.v33 = { setGod, findContacts: () => findContacts(), PFX, RO, rebaseOrigin, BASE, baseSeg, spawnIcehawk, rockDamage, CHIPPED, xform, get carRig() { return carRig; }, setCam, gsSupermode, setPhase, aiAnalysis, get cockpit() { return cockpit; }, get wingmen() { return wingmen; }, get carrier() { return carrier; }, get drone() { return drone; }, shotPool, misPool, DESTROYED };
 window.__game.ready = true;
 if (TEST) {
   S.noCollide = !params.has('collide');

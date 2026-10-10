@@ -288,3 +288,6 @@ body.ui-off #trayTab { display: none; }
 #safeAlt.hidden { display: none; }
 #altFill { top: auto !important; bottom: 0; margin-top: 0 !important; }
 #altSafe { z-index: 2; opacity: 0.9; } #altFill { opacity: 0.75; } #altKnob { z-index: 3; }
+
+#godBadge { position: absolute; right: calc(var(--sar) + 120px); top: calc(var(--sat) + 10px); z-index: 25; font: 900 12px system-ui; letter-spacing: 2px; color: #fff6d8; background: linear-gradient(90deg, rgba(255,170,40,0.7), rgba(255,90,40,0.6)); padding: 4px 10px; border-radius: 10px; pointer-events: none; }
+#godBadge.hidden { display: none; }
