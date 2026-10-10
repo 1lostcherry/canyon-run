@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=47';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=47';
-import { loadAssets } from './assets.js?v=47';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=48';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=48';
+import { loadAssets } from './assets.js?v=48';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=47';
-import { GpuDust } from './gpudust.js?v=47';
-import { PostFX } from './postfx.js?v=47';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=47';
-import { GameAudio } from './audio.js?v=47';
-import { Controls } from './input.js?v=47';
+import { Grass } from './grass.js?v=48';
+import { GpuDust } from './gpudust.js?v=48';
+import { PostFX } from './postfx.js?v=48';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=48';
+import { GameAudio } from './audio.js?v=48';
+import { Controls } from './input.js?v=48';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -516,7 +516,7 @@ window.__game = { S, controls, quality, renderer, scene, dust, glow, grass, chun
 function fmtTime(t) { const m = Math.floor(t / 60), sec = Math.floor(t % 60); return String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0'); }
 function pop(text, cls = '') {
   const d = document.createElement('div'); d.className = 'pop ' + cls; d.textContent = text;
-  $('pops').appendChild(d); setTimeout(() => d.remove(), 1350);
+  const P = $('pops'); for (const q of P.children) if (q.textContent === text) return; P.appendChild(d); while (P.childElementCount > 3) P.firstElementChild.remove(); setTimeout(() => d.remove(), 1350); // max 3 stacked, no duplicates
 }
 let flashV = 0;
 function flash(v) { flashV = Math.max(flashV, v); }
@@ -2374,7 +2374,7 @@ const portalMat = new THREE.ShaderMaterial({
     void main(){ vec2 p = vUv * 2.0 - 1.0; float r = length(p), a = atan(p.y, p.x);
       float ring = smoothstep(0.08, 0.0, abs(r - 0.92)) * 2.2;
       float sw = 0.5 + 0.5 * sin(a * 7.0 + r * 16.0 - time * 9.0);
-      float disc = smoothstep(0.95, 0.2, r) * (0.25 + 0.55 * sw * smoothstep(0.0, 0.7, r)) * (0.12 + 0.88 * smoothstep(0.05, 0.75, r)); // v44: darker centre, less white bloom
+      float disc = smoothstep(0.95, 0.2, r) * (0.25 + 0.55 * sw * smoothstep(0.0, 0.7, r)) * (0.05 + 0.95 * smoothstep(0.15, 0.8, r)) * 0.8; // v44: darker centre, less white bloom
       vec3 cA = mix(vec3(0.5, 0.85, 1.4), vec3(1.4, 0.75, 0.35), ice), cB = mix(vec3(0.7, 0.85, 1.2), vec3(1.1, 0.85, 0.6), ice);
       gl_FragColor = vec4(mix(cA, cB, sw) * (ring + disc), (ring + disc) * k * step(r, 1.05)); }`,
 });
@@ -2398,10 +2398,10 @@ const PFX = (() => {
         vec3 p = mix(st, ring, e);
         p += normalize(p + 0.001) * flash * 260.0 * aR.z;
         vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mv;
-        gl_PointSize = clamp(px * (1.0 + 2.0 * aR.w) * 700.0 / -mv.z, 1.0, 4.5);
+        gl_PointSize = clamp(px * (1.0 + 2.0 * aR.w) * 700.0 / -mv.z, 1.0, 3.2);
         vA = (0.04 + 0.2 * e) * step(0.001, k) * (1.0 + flash * 2.0) * clamp(1.0 - flash * 0.8, 0.0, 1.0) + flash * 0.4 * (1.0 - flash * 0.6); vH = aR.y; }`,
     fragmentShader: `uniform float ice; varying float vA; varying float vH;
-      void main(){ vec2 c = gl_PointCoord - 0.5; float d = dot(c, c); if (d > 0.25) discard; vec3 col = mix(mix(vec3(0.9, 0.3, 1.6), vec3(0.2, 0.8, 1.8), vH), vec3(0.7, 1.3, 2.0), ice); gl_FragColor = vec4(col * 0.45 * (1.0 - d * 3.0), vA); }` });
+      void main(){ vec2 c = gl_PointCoord - 0.5; float d = dot(c, c); if (d > 0.25) discard; vec3 col = mix(mix(vec3(0.9, 0.3, 1.6), vec3(0.2, 0.8, 1.8), vH), vec3(0.7, 1.3, 2.0), ice); gl_FragColor = vec4(col * 0.17 * (1.0 - d * 3.0), vA * 0.6); }` });
   const pts = new THREE.Points(g, mat); pts.frustumCulled = false; pts.renderOrder = 16; portal.add(pts);
   return { pts, mat, max, n: max, slowT: 0 };
 })();
@@ -2781,7 +2781,7 @@ function rxUpdate(dt, rdt) { // dt = game (possibly slow-mo) time, rdt = real ti
 }
 function rxCamera(dt) {
   const m = RX.ride;
-  if (!(m && m.on)) viewCamera(dt);
+  if (!(m && m.on)) viewCamera(dt); else if (cockpit && cockpit.g.visible) { cockpit.g.visible = false; ship.visible = true; } // missile cam never shows the cockpit shell
   if (m && m.on) {
     _rq.copy(m.v).normalize();
     camera.position.copy(m.p).addScaledVector(_rq, -10); camera.position.y += 2.4;
