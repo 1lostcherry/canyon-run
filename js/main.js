@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=45';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=45';
-import { loadAssets } from './assets.js?v=45';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=46';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=46';
+import { loadAssets } from './assets.js?v=46';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=45';
-import { GpuDust } from './gpudust.js?v=45';
-import { PostFX } from './postfx.js?v=45';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=45';
-import { GameAudio } from './audio.js?v=45';
-import { Controls } from './input.js?v=45';
+import { Grass } from './grass.js?v=46';
+import { GpuDust } from './gpudust.js?v=46';
+import { PostFX } from './postfx.js?v=46';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=46';
+import { GameAudio } from './audio.js?v=46';
+import { Controls } from './input.js?v=46';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -3611,7 +3611,7 @@ function aiAnalysis() {
     if (near) { const q = predict(S.steerS || 0, 0, 4, 16, 1.5); if (q.hit < Math.min(4, tti) && q.y - world.surface(q.x, q.z) < 1.6) { tti = q.hit; what = 'TERRAIN COLLISION'; } } }
   for (const e of RX.enemies) { if (e.dead) continue; const rx = e.p.x - S.pos.x, ry = e.p.y - S.pos.y, rz = e.p.z - S.pos.z, wx = e.v.x - vx, wy = e.v.y - vy, wz = e.v.z - vz, w2 = wx * wx + wy * wy + wz * wz; if (w2 < 1) continue; const t = -(rx * wx + ry * wy + rz * wz) / w2; if (t <= 0 || t > H || t >= tti) continue; const d = Math.hypot(rx + wx * t, ry + wy * t, rz + wz * t); if (d < 40) { tti = t; what = 'HOSTILE CLOSING'; } }
   for (const s of shotPool) { if (!s.on) continue; const rx = s.p.x - S.pos.x, ry = s.p.y - S.pos.y, rz = s.p.z - S.pos.z, wx = s.v.x - vx, wy = s.v.y - vy, wz = s.v.z - vz, w2 = wx * wx + wy * wy + wz * wz; const t = w2 > 1 ? -(rx * wx + ry * wy + rz * wz) / w2 : -1; if (t > 0 && t < tti && Math.hypot(rx + wx * t, ry + wy * t, rz + wz * t) < 25) { tti = t; what = 'MISSILE INBOUND'; } }
-  if (inSafeBand()) { tti = Infinity; what = null; } // SAFE ALTITUDE: above every obstacle, nothing to predict
+  if (inSafeBand() || RX.god) { tti = Infinity; what = null; } // SAFE ALTITUDE: above every obstacle, nothing to predict
   const box = $('aiBox'); box.classList.remove('hidden');
   if (tti === Infinity) { box.className = ''; box.textContent = 'AI ANALYSIS · ' + scanKm.toFixed(1) + ' KM / 10 s · CLEAR'; RX.aiLast = null; return '<b class="ok">AI · ' + scanKm.toFixed(1) + ' KM · PATH CLEAR</b>'; }
   // safest escape: evaluate clearance of each manoeuvre with the full flight model

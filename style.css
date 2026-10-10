@@ -306,12 +306,13 @@ body.ui-off #trayTab { display: none; }
 
 body.tray-open #trayTab, body.tray-open #trayHandle, body.tray-open #rxQuick, body.tray-open #modes { display: none !important; }
 @media (orientation: portrait) {
-  #tl { top: calc(var(--sat) + 228px) !important; } #tr { top: calc(var(--sat) + 228px) !important; }
-  #altBar { top: calc(var(--sat) + 340px) !important; }
-  #aiBox { top: calc(var(--sat) + 184px) !important; max-width: 92vw; white-space: normal; text-align: center; }
+  #tl { top: calc(var(--sat) + 250px) !important; } #tr { top: calc(var(--sat) + 250px) !important; }
+  #altBar { top: calc(var(--sat) + 362px) !important; }
+  #aiBox { top: calc(var(--sat) + 204px) !important; max-width: 92vw; white-space: normal; text-align: center; }
   #godBadge { right: auto; left: calc(var(--sal) + 8px); top: calc(var(--sat) + 6px); font-size: 10px; }
   #rxQuick { bottom: calc(var(--sab) + 48px) !important; }
   #rxInfo { bottom: calc(var(--sab) + 190px) !important; top: auto !important; }
 }
 
 #rotate { bottom: auto !important; top: 45% !important; }
+@media (orientation: portrait) { #hint { top: 56% !important; bottom: auto !important; } #rotate { top: 62% !important; } }
