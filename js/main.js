@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=43';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=43';
-import { loadAssets } from './assets.js?v=43';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=44';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=44';
+import { loadAssets } from './assets.js?v=44';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=43';
-import { GpuDust } from './gpudust.js?v=43';
-import { PostFX } from './postfx.js?v=43';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=43';
-import { GameAudio } from './audio.js?v=43';
-import { Controls } from './input.js?v=43';
+import { Grass } from './grass.js?v=44';
+import { GpuDust } from './gpudust.js?v=44';
+import { PostFX } from './postfx.js?v=44';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=44';
+import { GameAudio } from './audio.js?v=44';
+import { Controls } from './input.js?v=44';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -943,7 +943,7 @@ function updateFlight(dt) {
     if (S.agl < 2) { if (!S.fallSeq) S.crashCause = 'ENGINE FAILURE · 7 HITS'; crash(); }
     return { thr: 0, spdN: spdNf(S.speed) };
   }
-  let steer = controls.steer, pitchIn = altHoldInput(); // altitude comes from the left slider target (0-500 m AGL)
+  let steer = controls.steer, pitchIn = altHoldInput(); S.holdDirect = S.mode === 'playing' && !S.autopilot && !rxForceAP() && !safeMode && !RX.smart; // altitude comes from the left slider target (0-500 m AGL)
   gatherObstacles();
   if (S.mode === 'playing' && S.autopilot && !TEST && !S.apManual) { S.apOverT = (Math.abs(controls.steer) > 0.85 || Math.abs(controls.pitch) > 0.85) ? (S.apOverT || 0) + dt : 0; if (S.apOverT > 0.5) setAutopilot(false); }
   S.apManual = S.mode === 'playing' && S.autopilot && safeMode && !rxForceAP();
@@ -969,11 +969,18 @@ function updateFlight(dt) {
   const HMAX = 1.15;
   if (Math.abs(S.heading) > HMAX) S.heading = Math.sign(S.heading) * HMAX;
   // pitch
-  const ptarget = pitchIn * 0.30;
-  S.pitch = damp(S.pitch, ptarget, 5, dt);
+  let ptarget = pitchIn * 0.30, prate = 5, vmax = 130;
+  if (S.holdDirect) { const sp = Math.max(S.speed, 20); vmax = clamp(90 + sp * 0.25, 90, 3000);
+    const g0 = world.surface(S.pos.x, S.pos.z), L = clamp(sp * 0.3, 30, 1500), dx = -Math.sin(S.heading), dz = -Math.cos(S.heading);
+    let gA = -1e9; for (const k of [0.5, 1, 2, 3]) gA = Math.max(gA, world.surface(S.pos.x + dx * L * k, S.pos.z + dz * L * k) - (k - 1) * 0); // anticipate rising ground over ~1 s
+    const gN = world.surface(S.pos.x + dx * L, S.pos.z + dz * L);
+    const ff = clamp((Math.max(gN, gA - 40) - g0) / L * sp, -vmax, vmax), T = controls.altTarget ?? 30;
+    const vyT = clamp(ff * 0.9 + (T - S.agl) * 2.0, -vmax, vmax); S.vyT = vyT;
+    ptarget = Math.asin(clamp(vyT / sp, -0.75, 0.75)); prate = 12; }
+  S.pitch = damp(S.pitch, ptarget, prate, dt);
   _fwd.set(-Math.sin(S.heading) * Math.cos(S.pitch), Math.sin(S.pitch), -Math.cos(S.heading) * Math.cos(S.pitch));
   S.vel.copy(_fwd).multiplyScalar(S.speed);
-  if (Math.abs(S.vel.y) > 130) S.vel.y = Math.sign(S.vel.y) * 130;
+  if (Math.abs(S.vel.y) > vmax) S.vel.y = Math.sign(S.vel.y) * vmax;
   (S.prevPos || (S.prevPos = new THREE.Vector3())).copy(S.pos);
   S.pos.addScaledVector(S.vel, dt);
   geyserForces(dt);
@@ -2366,8 +2373,8 @@ const portalMat = new THREE.ShaderMaterial({
     void main(){ vec2 p = vUv * 2.0 - 1.0; float r = length(p), a = atan(p.y, p.x);
       float ring = smoothstep(0.08, 0.0, abs(r - 0.92)) * 2.2;
       float sw = 0.5 + 0.5 * sin(a * 7.0 + r * 16.0 - time * 9.0);
-      float disc = smoothstep(0.95, 0.2, r) * (0.25 + 0.55 * sw * smoothstep(0.0, 0.7, r));
-      vec3 cA = mix(vec3(0.5, 0.85, 1.4), vec3(1.4, 0.75, 0.35), ice), cB = mix(vec3(0.95, 1.0, 1.3), vec3(1.3, 1.0, 0.7), ice);
+      float disc = smoothstep(0.95, 0.2, r) * (0.25 + 0.55 * sw * smoothstep(0.0, 0.7, r)) * (0.12 + 0.88 * smoothstep(0.05, 0.75, r)); // v44: darker centre, less white bloom
+      vec3 cA = mix(vec3(0.5, 0.85, 1.4), vec3(1.4, 0.75, 0.35), ice), cB = mix(vec3(0.7, 0.85, 1.2), vec3(1.1, 0.85, 0.6), ice);
       gl_FragColor = vec4(mix(cA, cB, sw) * (ring + disc), (ring + disc) * k * step(r, 1.05)); }`,
 });
 const portal = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), portalMat); portal.visible = false; portal.frustumCulled = false; portal.renderOrder = 15; scene.add(portal);
@@ -2803,6 +2810,7 @@ function rxMenuSync() {
   set('mxHelp', RX.g47h ? 'G47 HELPERS · ON' : 'G47 HELPERS · OFF', RX.g47h);
   set('mxG47fz', RX.g47fz ? 'G47 FREEZE MSL · ON' : 'G47 FREEZE MSL · OFF', RX.g47fz);
   set('mxSmartM', RX.smartM ? 'SMART MISSILES · ON' : 'SMART MISSILES · OFF', RX.smartM);
+  set('rqGod', RX.god ? '⚡ GOD ON' : '⚡ GOD', !!RX.god);
   set('mxGod', RX.god ? 'GOD MODE · ON' : 'GOD MODE · OFF', !!RX.god);
   set('mxFingerH', controls.fingerHeight ? 'FINGER HEIGHT · ON' : 'FINGER HEIGHT · OFF', !!controls.fingerHeight);
   set('mxSuper', RX.super ? 'SUPERSAFE · ON' : 'SUPERSAFE · OFF', RX.super);
@@ -2822,7 +2830,7 @@ function rxMenuSync() {
   const vc = $('voiceChip'); if (vc) vc.textContent = 'Voice callouts: ' + (RX.voice ? 'ON' : 'OFF');
   $('rxScan').classList.toggle('hidden', !RX.scanner); if (!RX.scanner) $('aiBox').classList.add('hidden');
 }
-function rxMenu(open) { const m = $('rxMenu'); const o = open ?? m.classList.contains('hidden'); m.classList.toggle('hidden', !o); $('rxScrim').classList.toggle('hidden', !o); $('rxTab').classList.toggle('on', o); }
+function rxMenu(open) { const m = $('rxMenu'); const o = open ?? m.classList.contains('hidden'); m.classList.toggle('hidden', !o); document.body.classList.toggle('tray-open', o); $('rxScrim').classList.toggle('hidden', !o); $('rxTab').classList.toggle('on', o); }
 // ---------- optional escorts: command carrier (+2 helpers) and scout drone with live camera feeds ----------
 RX.carrier = false; RX.drone = false; RX.pip = 0; RX.strikeCool = 40; RX.strikeOffer = false; RX.strikeFx = 0;
 let carrier = null, drone = null;
@@ -2927,7 +2935,7 @@ const RX_ACT = {
   mxCarrier: () => setCarrier(!RX.carrier), mxDrone: () => setDrone(!RX.drone), mxPip: () => cyclePip(),
   mxSwipe: () => { controls.swipeSteer = !controls.swipeSteer; localStorage.setItem('canyon.swipe', controls.swipeSteer ? '1' : '0'); pop(controls.swipeSteer ? 'SWIPE STEERING ON · DRAG TO FLY' : 'SWIPE STEERING OFF', 'banked'); rxMenuSync(); },
   mxAuto: () => { setAutopilot(!S.autopilot); rxMenuSync(); }, mxSafe: () => { setSafe(!safeMode); rxMenuSync(); }, mxFire: () => fireMissile(),
-  mxGod: () => setGod(!RX.god), mxFingerH: () => { controls.fingerHeight = !controls.fingerHeight; localStorage.setItem('canyon.fingerH', controls.fingerHeight ? '1' : '0'); pop('FINGER HEIGHT ' + (controls.fingerHeight ? 'ON' : 'OFF'), 'unlock'); rxMenuSync(); },
+  mxGod: () => setGod(!RX.god), rqGod: () => setGod(!RX.god), mxFingerH: () => { controls.fingerHeight = !controls.fingerHeight; localStorage.setItem('canyon.fingerH', controls.fingerHeight ? '1' : '0'); pop('FINGER HEIGHT ' + (controls.fingerHeight ? 'ON' : 'OFF'), 'unlock'); rxMenuSync(); },
   mxSuper: () => { RX.super = !RX.super; pop(RX.super ? 'BLACKHAWK SUPERSAFE · CUTS THROUGH OBSTACLES' : 'SUPERSAFE OFF', 'unlock'); rxMenuSync(); },
   mxX: () => { RX.xsurv = !RX.xsurv; pop(RX.xsurv ? 'X SURVIVAL · WATER & ROCK IMPACTS ABSORBED' : 'X SURVIVAL OFF', 'unlock'); rxMenuSync(); },
   mxPhase: () => setPhase((RX.phase + 1) % 3), mxSmart: () => { RX.smart = !RX.smart; pop(RX.smart ? 'SMART ROCK AVOIDANCE ON' : 'SMART ROCK AVOIDANCE OFF', 'banked'); rxMenuSync(); },
@@ -2941,11 +2949,24 @@ const RX_ACT = {
   rxCardYes: () => scoutStrike(), rxCardNo: () => { strikeCard(false); RX.strikeCool = 45; }, rxMenuX: () => rxMenu(false),
   rxWaveBtn: () => freezeWave(), rxCamBtn: () => rideToggle(), rxExit: () => endRide(), rxLandBtn: () => rxLandToggle(),
 };
-for (const id in RX_ACT) { const el = $(id); if (!el) continue; el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); audio.resume(); RX_ACT[id](); }); el.addEventListener('click', (e) => e.stopPropagation()); }
+for (const id in RX_ACT) { const el = $(id); if (!el) continue; const inTray = !!el.closest('#rxMenu') && id !== 'rxMenuX';
+  if (inTray) { // tray buttons fire on a clean tap (pointerup without drag) so a sideways swipe scrolls the tray instead of toggling
+    el.addEventListener('pointerdown', (e) => { e.preventDefault(); el._tap = { x: e.clientX, y: e.clientY, sl: $('rxMenu').scrollLeft }; });
+    el.addEventListener('pointerup', (e) => { const t = el._tap; el._tap = null; e.stopPropagation(); if (!t || Math.abs(e.clientX - t.x) > 12 || Math.abs(e.clientY - t.y) > 12 || Math.abs($('rxMenu').scrollLeft - t.sl) > 6) return; audio.resume(); RX_ACT[id](); });
+  } else el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); audio.resume(); RX_ACT[id](); }); el.addEventListener('click', (e) => e.stopPropagation()); }
 $('rxTab').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); rxMenu(); });
 $('rxTab').addEventListener('click', (e) => e.stopPropagation());
-$('rxMenu').addEventListener('pointerdown', (e) => { e.stopPropagation(); RX.mSw = { x: e.clientX, y: e.clientY }; });
-$('rxMenu').addEventListener('pointerup', (e) => { const w = RX.mSw; RX.mSw = null; if (w && e.clientY - w.y > 50 && e.clientY - w.y > Math.abs(e.clientX - w.x) * 1.5) rxMenu(false); }); // tray scrolls sideways; swipe down to close
+$('rxMenu').addEventListener('pointerdown', (e) => { e.stopPropagation(); RX.mSw = { x: e.clientX, y: e.clientY, lx: e.clientX, sl: $('rxMenu').scrollLeft, v: 0, t: performance.now() }; });
+// JS drag-scroll for the tray (iOS Safari: the page blocks native touch scrolling, so the tray scrolls itself) + momentum
+addEventListener('pointermove', (e) => { const w = RX.mSw; if (!w) return; const m = $('rxMenu'), dx = e.clientX - w.lx, now = performance.now(); m.scrollLeft -= dx; w.v = dx / Math.max(1, now - w.t); w.lx = e.clientX; w.t = now; });
+addEventListener('pointercancel', () => { RX.mSw = null; });
+function trayFling(v) { const m = $('rxMenu'); let vv = v * 16; const tick = () => { if (Math.abs(vv) < 0.5 || RX.mSw) return; m.scrollLeft -= vv; vv *= 0.92; requestAnimationFrame(tick); }; requestAnimationFrame(tick); }
+function trayPage(dir) { const m = $('rxMenu'); m.scrollTo({ left: m.scrollLeft + dir * m.clientWidth * 0.8, behavior: 'smooth' }); }
+function trayDots() { const m = $('rxMenu'), d = $('trayDots'); if (!d) return; const n = Math.max(1, Math.ceil(m.scrollWidth / m.clientWidth)), i = Math.round(m.scrollLeft / Math.max(1, m.scrollWidth - m.clientWidth) * (n - 1));
+  if (d.childElementCount !== n) d.innerHTML = '<i></i>'.repeat(n); [...d.children].forEach((c, k) => c.classList.toggle('on', k === i)); $('trayL').classList.toggle('dim', m.scrollLeft < 4); $('trayR').classList.toggle('dim', m.scrollLeft > m.scrollWidth - m.clientWidth - 4); }
+$('rxMenu').addEventListener('scroll', trayDots); setInterval(trayDots, 500);
+for (const [id, dir] of [['trayL', -1], ['trayR', 1]]) { $(id).addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); trayPage(dir); }); }
+$('rxMenu').addEventListener('pointerup', (e) => { const w = RX.mSw; RX.mSw = null; if (w && Math.abs(w.v) > 0.3) trayFling(w.v); if (w && e.clientY - w.y > 50 && e.clientY - w.y > Math.abs(e.clientX - w.x) * 1.5) rxMenu(false); }); // tray scrolls sideways; swipe down to close
 $('rxScrim').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); rxMenu(false); }); // tap outside closes
 $('voiceChip').addEventListener('click', (e) => { e.stopPropagation(); setVoice(!RX.voice); });
 addEventListener('keydown', (e) => {
@@ -3193,6 +3214,8 @@ const BASE = (() => {
 })();
 const _bm = new THREE.Matrix4(), _bp = new THREE.Vector3(), _bq = new THREE.Quaternion(), _bs = new THREE.Vector3(1, 1, 1), _be = new THREE.Euler();
 function bPut(m, x, y, z, ry = 0, sx = 1, sy = 1, sz = 1, rx = 0) { if (m.count >= m.instanceMatrix.count) return; _bp.set(x, y, z); _be.set(rx, ry, 0); _bq.setFromEuler(_be); _bs.set(sx, sy, sz); _bm.compose(_bp, _bq, _bs); m.setMatrixAt(m.count++, _bm); }
+const BASE_DEAD = new Set(); // destroyed base props persist across streaming
+const BASE_R = { hangar: 26, bldg: 14, radar: 8, sam: 7, truck: 6, fuel: 6, jet: 18, gen: 4, heli: 9, pole: 2 }, BASE_H = { hangar: 22, bldg: 10, radar: 22, sam: 5, truck: 4, fuel: 6, jet: 8, gen: 4, heli: 6, pole: 13 };
 function baseSeg(A, k) { // deterministic, dense layout for one 500 m segment of the levelled base pad
   const key = A.start * 1000 + k; let sg = BASE.segs.get(key); if (sg) return sg;
   const r = makeRng((A.seed ^ (k * 2246822519)) >>> 0), d0 = A.start + k * 500, sd = baseSide(A), items = [];
@@ -3208,6 +3231,7 @@ function baseSeg(A, k) { // deterministic, dense layout for one 500 m segment of
   for (let j = 0; j < 2; j++) { const [x, z] = at(r() * 500, 200 + r() * 150); items.push([r() < 0.5 ? 'fuel' : 'gen', x, z, r() * 6.28]); }
   for (const off of [-170, BASE_HALF - 20]) { const [x, z] = at(250, off); items.push(['fence', x, z]); }
   for (let j = 0; j < 5; j++) { const [x, z] = at(j * 100, 210); items.push(['pole', x, z]); }
+  items.forEach((it, i) => { it.uid = key + ':' + i; if (BASE_DEAD.has(it.uid)) it.dead = true; });
   sg = { items }; BASE.segs.set(key, sg); if (BASE.segs.size > 600) BASE.segs.delete(BASE.segs.keys().next().value); return sg;
 }
 function updateBase() {
@@ -3216,15 +3240,19 @@ function updateBase() {
   if (A && S.mode !== 'attract') {
     const k0 = Math.max(0, Math.floor((d - A.start - 1000) / 500)), k1 = Math.min(199, Math.floor((d - A.start + 5000) / 500));
     const t = S.t;
+    const smash = (RX.god || RX.super) && S.mode === 'playing';
     for (let k = k0; k <= k1; k++) for (const it of baseSeg(A, k).items) {
+      if (it.dead) continue;
       const [ty, x, z, ry = 0] = it, y = world.surface(x, z);
+      if (smash && BASE_R[ty]) { const zz = ty === 'truck' ? z + ((t * 14 + ry * 50) % 300) - 150 : z, dx = x - S.pos.x, dz = zz - S.pos.z, rr = BASE_R[ty] + 8;
+        if (dx * dx + dz * dz < rr * rr && S.pos.y < y + BASE_H[ty] + 8) { it.dead = true; BASE_DEAD.add(it.uid); S.godKills = (S.godKills || 0) + 1; S.baseKills = (S.baseKills || 0) + 1; airburst(_v.set(x, y + BASE_H[ty] * 0.5, zz).clone()); S.shake = Math.max(S.shake, 0.4); continue; } }
       if (ty === 'rw') { const ang = 0; bPut(BASE.tile, x, y + 0.2, z, ang); bPut(BASE.dash, x, y + 0.45, z, ang); bPut(BASE.dash, x, y + 0.45, z + 50, ang); for (const s2 of [-1, 1]) for (let q = 0; q < 4; q++) bPut(BASE.edge, x + s2 * 31, y + 0.6, z - 50 + q * 25); }
       else if (ty === 'hangar') { bPut(BASE.hangarBase, x, y + 2, z, ry); bPut(BASE.hangar, x, y + 4, z, ry); }
       else if (ty === 'radar') { bPut(BASE.radarMast, x, y + 7, z); bPut(BASE.radarDish, x, y + 15, z, t * 1.4 + ry, 1, 1, 1, -1.1); }
       else if (ty === 'sam') { bPut(BASE.samBase, x, y + 1.1, z, ry); bPut(BASE.samTube, x, y + 3, z, ry, 1, 1, 1, -0.5); }
       else if (ty === 'truck') { const dz = ((t * 14 + ry * 50) % 300) - 150; bPut(BASE.truck, x, y + world.surface(x, z + dz) - y + 1.5, z + dz, 0); } // moving machinery
       else if (ty === 'fuel') { bPut(BASE.truck, x, y + 1.5, z, ry); bPut(BASE.tank, x, y + 3.6, z, ry); }
-      else if (ty === 'jet') { bPut(BASE.jetBody, x, y + 1.6, z, ry); bPut(BASE.jetWing, x, y + 1.6, z + 1, ry); }
+      else if (ty === 'jet') { bPut(BASE.jetBody, x, y + 3.4, z, ry, 2.1, 2.1, 2.1); bPut(BASE.jetWing, x, y + 3.4, z, ry, 2.1, 2.1, 2.1); } // parked jets: 2.1x so they read from the air
       else if (ty === 'bldg') bPut(BASE.bldg, x, y + 4.5, z, ry);
       else if (ty === 'gen') bPut(BASE.gen, x, y + 1.5, z, ry);
       else if (ty === 'twy') bPut(BASE.twy, x, y + 0.18, z);
@@ -3594,7 +3622,7 @@ function aiAnalysis() {
   return '<b class="bad">AI · ' + what + ' ' + tti.toFixed(1) + 's · ' + best + '</b>';
 }
 window.__game.forceCrash = () => crash();
-window.__game.v33 = { setGod, findContacts: () => findContacts(), PFX, RO, rebaseOrigin, BASE, baseSeg, spawnIcehawk, rockDamage, CHIPPED, xform, get carRig() { return carRig; }, setCam, gsSupermode, setPhase, aiAnalysis, get cockpit() { return cockpit; }, get wingmen() { return wingmen; }, get carrier() { return carrier; }, get drone() { return drone; }, shotPool, misPool, DESTROYED };
+window.__game.v33 = { setGod, baseSeg: (A, k) => baseSeg(A, k), BASE_DEAD, findContacts: () => findContacts(), PFX, RO, rebaseOrigin, BASE, baseSeg, spawnIcehawk, rockDamage, CHIPPED, xform, get carRig() { return carRig; }, setCam, gsSupermode, setPhase, aiAnalysis, get cockpit() { return cockpit; }, get wingmen() { return wingmen; }, get carrier() { return carrier; }, get drone() { return drone; }, shotPool, misPool, DESTROYED };
 window.__game.ready = true;
 if (TEST) {
   S.noCollide = !params.has('collide');

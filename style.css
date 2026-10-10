@@ -256,7 +256,7 @@ body.ui-off #tl, body.ui-off #tc, body.ui-off #tr, body.ui-off #thrBar, body.ui-
 /* v33: bottom horizontally scrollable control tray */
 #rxMenu { top: auto !important; left: calc(var(--sal) + 8px) !important; right: calc(var(--sar) + 8px) !important; bottom: calc(var(--sab) + 6px); width: auto !important; min-width: 0 !important; max-height: 46vh !important; display: flex !important; flex-direction: row; flex-wrap: nowrap; gap: 8px; overflow-x: auto; overflow-y: hidden; touch-action: pan-x; padding: 8px 10px; grid-template-columns: none !important; }
 #rxMenu.hidden { display: none !important; }
-#rxMenu .mh { position: sticky; left: 0; flex: 0 0 64px; flex-direction: column; justify-content: center; gap: 6px; font-size: 9px; letter-spacing: 1.5px; text-align: center; background: rgba(20,12,6,0.95); z-index: 2; }
+#rxMenu .mh { position: sticky; left: 30px; flex: 0 0 64px; flex-direction: column; justify-content: center; gap: 6px; font-size: 9px; letter-spacing: 1.5px; text-align: center; background: rgba(20,12,6,0.95); z-index: 2; }
 #rxMenu .tg { flex: 0 0 auto; display: grid; grid-auto-flow: column; grid-template-rows: auto 1fr 1fr; gap: 5px; padding: 0 8px; border-left: 1px solid rgba(255,207,138,0.2); }
 #rxMenu .gh { grid-row: 1; grid-column: 1 / span 9; font-size: 9px; font-weight: 900; letter-spacing: 2px; color: #ffcf8a; }
 #rxMenu .mx { min-width: 92px; padding: 8px 6px; min-height: 36px; }
@@ -291,3 +291,25 @@ body.ui-off #trayTab { display: none; }
 
 #godBadge { position: absolute; right: calc(var(--sar) + 120px); top: calc(var(--sat) + 10px); z-index: 25; font: 900 12px system-ui; letter-spacing: 2px; color: #fff6d8; background: linear-gradient(90deg, rgba(255,170,40,0.7), rgba(255,90,40,0.6)); padding: 4px 10px; border-radius: 10px; pointer-events: none; }
 #godBadge.hidden { display: none; }
+
+/* v44: HUD read-outs never swallow touches; tray arrows + dots */
+#hud, #tl, #tc, #tr, #score, #hpBox, #engBox, #speed, #comboBox, #modes, #pops, #rxInfo, #aiBox, #storm, #skim, #fzBonus, #safeAlt, #godBadge, #rxAmmo, #hint, #altLbl, #altPct, #thrLbl, #thrPct, #ammoPips, #lockRet { pointer-events: none !important; }
+#hud button, #hud .ui { pointer-events: auto !important; }
+#rxMenu { overflow-x: auto; -webkit-overflow-scrolling: touch; touch-action: pan-x; scrollbar-width: none; }
+.trayArr { position: sticky; top: 50%; flex: 0 0 30px; align-self: stretch; z-index: 3; font: 900 22px system-ui; color: #ffcf8a; background: rgba(20,12,6,0.92); border: 1px solid rgba(255,207,138,0.4); border-radius: 10px; }
+#trayL { left: 0; order: -2; } #trayR { right: 0; order: 99; }
+.trayArr.dim { opacity: 0.3; }
+#trayDots { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--sab) + 1px); display: flex; gap: 5px; z-index: 31; pointer-events: none; }
+#rxMenu.hidden ~ #trayDots, #rxMenu.hidden #trayDots { display: none; }
+#trayDots i { width: 6px; height: 6px; border-radius: 3px; background: rgba(255,207,138,0.35); } #trayDots i.on { background: #ffcf8a; }
+#rqGod.on { background: linear-gradient(180deg, #ffb347, #ff6a2a) !important; color: #fff !important; }
+
+body.tray-open #trayTab, body.tray-open #trayHandle, body.tray-open #rxQuick, body.tray-open #modes { display: none !important; }
+@media (orientation: portrait) {
+  #tl { top: calc(var(--sat) + 205px) !important; } #tr { top: calc(var(--sat) + 205px) !important; }
+  #altBar { top: calc(var(--sat) + 318px) !important; }
+  #aiBox { top: calc(var(--sat) + 172px) !important; max-width: 92vw; white-space: normal; text-align: center; }
+  #godBadge { right: auto; left: calc(var(--sal) + 8px); top: calc(var(--sat) + 6px); font-size: 10px; }
+  #rxQuick { bottom: calc(var(--sab) + 48px) !important; }
+  #rxInfo { bottom: calc(var(--sab) + 190px) !important; top: auto !important; }
+}

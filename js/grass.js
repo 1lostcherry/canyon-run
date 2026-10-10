@@ -1,6 +1,6 @@
 // GPU instanced grass with wind sway + jet-wash (radial push, flattened wake, outward ripple rings)
 import * as THREE from 'three';
-import { DX, DZ, X0, SEG_X } from './terrain.js?v=43';
+import { DX, DZ, X0, SEG_X } from './terrain.js?v=44';
 
 const ROWS = 64, COLS = SEG_X + 1, TRAIL = 10;
 

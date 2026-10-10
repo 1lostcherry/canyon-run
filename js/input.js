@@ -201,7 +201,7 @@ export class Controls {
     }
     this.steer = clamp(steer + this._kx + this.touchSteer, -1, 1);
     { const held = this.drags && [...this.drags.values()].some((q) => q.kind === 'swipe');
-      if (this.fingerHeight && held && this.fingerT !== null) this.altTarget = (this.altTarget ?? 30) + (this.fingerT - (this.altTarget ?? 30)) * (1 - Math.exp(-dt / 0.1)); } // ~0.3 s blend, last target kept on release
+      if (this.fingerHeight && held && this.fingerT !== null) this.altTarget = (this.altTarget ?? 30) + (this.fingerT - (this.altTarget ?? 30)) * (1 - Math.exp(-dt / 0.04)); } // ~0.12 s blend, last target kept on release
     if (Math.abs(this._ky) > 0.05) this.altTarget = clamp((this.altTarget ?? 30) + this._ky * 160 * dt, 0, 500); // keyboard up/down moves the altitude target
     this.pitch = clamp(pitch, -1, 1);
   }
