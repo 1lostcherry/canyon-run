@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=39';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=39';
-import { loadAssets } from './assets.js?v=39';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=40';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=40';
+import { loadAssets } from './assets.js?v=40';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=39';
-import { GpuDust } from './gpudust.js?v=39';
-import { PostFX } from './postfx.js?v=39';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=39';
-import { GameAudio } from './audio.js?v=39';
-import { Controls } from './input.js?v=39';
+import { Grass } from './grass.js?v=40';
+import { GpuDust } from './gpudust.js?v=40';
+import { PostFX } from './postfx.js?v=40';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=40';
+import { GameAudio } from './audio.js?v=40';
+import { Controls } from './input.js?v=40';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -2335,6 +2335,32 @@ const portalMat = new THREE.ShaderMaterial({
       gl_FragColor = vec4(mix(cA, cB, sw) * (ring + disc), (ring + disc) * k * step(r, 1.05)); }`,
 });
 const portal = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), portalMat); portal.visible = false; portal.frustumCulled = false; portal.renderOrder = 15; scene.add(portal);
+// GPU-particle portal: fragments stream in from all around and converge into the ring; count adapts to the device
+const PFX = (() => {
+  const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent), cores = navigator.hardwareConcurrency || 4;
+  const max = TEST ? 120000 : mobile ? (cores >= 8 ? 600000 : 250000) : cores >= 8 ? 2000000 : 800000;
+  const g = new THREE.BufferGeometry(), a = new Float32Array(max * 4);
+  for (let i = 0; i < a.length; i++) a[i] = Math.random();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(max * 3), 3)); g.setAttribute('aR', new THREE.BufferAttribute(a, 4));
+  const mat = new THREE.ShaderMaterial({ uniforms: { k: { value: 0 }, time: { value: 0 }, flash: { value: 0 }, ice: { value: 0 }, px: { value: 1 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: `uniform float k; uniform float time; uniform float flash; uniform float px; attribute vec4 aR; varying float vA; varying float vH;
+      void main(){
+        float u = clamp(k * 1.25 - aR.w * 0.25, 0.0, 1.0); float e = u * u * (3.0 - 2.0 * u);
+        float th = aR.x * 6.2832, ph = acos(aR.y * 2.0 - 1.0), R0 = 700.0 + aR.z * 1400.0;
+        vec3 st = vec3(sin(ph) * cos(th), sin(ph) * sin(th) * 0.8, -abs(cos(ph)) - 0.15) * R0; // fragments come from beyond the ring
+        float ang = th + e * 3.5 * (aR.z - 0.3) + time * (0.6 + aR.w);
+        float rr = 92.0 + (aR.z - 0.5) * 30.0 * (1.0 - e * 0.6);
+        vec3 ring = vec3(cos(ang) * rr, sin(ang) * rr, (aR.w - 0.5) * 12.0);
+        vec3 p = mix(st, ring, e);
+        p += normalize(p + 0.001) * flash * 260.0 * aR.z;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp(px * (1.0 + 2.0 * aR.w) * 700.0 / -mv.z, 1.0, 4.5);
+        vA = (0.06 + 0.32 * e) * step(0.001, k) * (1.0 + flash * 2.0) * clamp(1.0 - flash * 0.8, 0.0, 1.0) + flash * 0.4 * (1.0 - flash * 0.6); vH = aR.y; }`,
+    fragmentShader: `uniform float ice; varying float vA; varying float vH;
+      void main(){ vec2 c = gl_PointCoord - 0.5; float d = dot(c, c); if (d > 0.25) discard; vec3 col = mix(mix(vec3(0.9, 0.3, 1.6), vec3(0.2, 0.8, 1.8), vH), vec3(0.7, 1.3, 2.0), ice); gl_FragColor = vec4(col * (1.0 - d * 3.0), vA); }` });
+  const pts = new THREE.Points(g, mat); pts.frustumCulled = false; pts.renderOrder = 16; portal.add(pts);
+  return { pts, mat, max, n: max, slowT: 0 };
+})();
 function blastGo() {
   if (S.car) { if (S.car.dir > 0) xform(); S.blastAfter = true; pop('TRANSFORMING TO FLIGHT FOR BLAST', 'banked'); return; }
   if (S.mode !== 'playing' || RX.blast || S.land) return;
@@ -2359,12 +2385,15 @@ function updateBlast(dt) {
     B.portal.p.y = Math.max(S.pos.y, world.surface(B.portal.p.x, B.portal.p.z) + 40);
   }
   if (B.portal) {
-    const P = B.portal; portal.visible = !B.passed; portal.position.copy(P.p); portal.rotation.set(0, P.h, 0);
+    const P = B.portal; headingFrame(P.h); P.p.copy(S.pos).addScaledVector(_rf, 60 + 1900 * Math.pow(1 - clamp(B.t / 0.95, 0, 1), 1.3)); P.p.y -= 70 * (1 - clamp(B.t / 0.95, 0, 1)); // at 470,000 km/h the ring is held in view and closes in over the transition
+    portal.visible = !B.passed; portal.position.copy(P.p); portal.rotation.set(0, P.h, 0);
+    PFX.mat.uniforms.k.value = clamp(B.t / 0.9, 0, 1); PFX.mat.uniforms.time.value = S.t; PFX.mat.uniforms.ice.value = RX.ice ? 1 : 0; PFX.mat.uniforms.flash.value = Math.max(0, (B.t - 0.85) * 4);
+    if (window.__game && window.__game.fps && window.__game.fps < 30 && !TEST && (PFX.slowT += 1 / 60) > 0.3 && PFX.n > 50000) { PFX.n = Math.floor(PFX.n * 0.6); PFX.pts.geometry.setDrawRange(0, PFX.n); PFX.slowT = 0; } // adaptive count
     portalMat.uniforms.k.value = clamp(B.t / 1.0, 0, 1); portal.scale.setScalar(Math.max(1, S.pos.distanceTo(P.p) / 1800)); portalMat.uniforms.ice.value = RX.ice ? 1 : 0;
     if (!B.passed) { // steer the ship into the ring; pass when its plane is crossed
       P.p.y = damp(P.p.y, S.pos.y, 3, dt);
       headingFrame(P.h); const along = (S.pos.x - P.p.x) * _rf.x + (S.pos.z - P.p.z) * _rf.z;
-      if (along > 0) { B.passed = true; B.endT = B.t; enterIceAge(!RX.ice); }
+      if (along > 0 || B.t > 0.95) { B.passed = true; B.endT = B.t; enterIceAge(!RX.ice); }
     }
   }
   if (B.passed) { RX.blast = null; RX.blastCool = 15; portal.visible = false; blastExit(); }
