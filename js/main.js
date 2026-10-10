@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=50';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=50';
-import { loadAssets } from './assets.js?v=50';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=51';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=51';
+import { loadAssets } from './assets.js?v=51';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=50';
-import { GpuDust } from './gpudust.js?v=50';
-import { PostFX } from './postfx.js?v=50';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=50';
-import { GameAudio } from './audio.js?v=50';
-import { Controls } from './input.js?v=50';
+import { Grass } from './grass.js?v=51';
+import { GpuDust } from './gpudust.js?v=51';
+import { PostFX } from './postfx.js?v=51';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=51';
+import { GameAudio } from './audio.js?v=51';
+import { Controls } from './input.js?v=51';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -370,7 +370,8 @@ const grass = new Grass(scene, {
   sunI: { value: 3.8 }, hemiI: { value: 1 }, fogColor: fogU.fogColor, fogNear: fogU.fogNear, fogFar: fogU.fogFar, hazeCol: hazeU.hazeCol, hazeK: hazeU.hazeK,
 }, 'high');
 const gdust = new GpuDust(scene, fogU, SUN, sunLight.color, 262144);
-const isGrassNear = (z) => { const B = world.biomeAt(z); if (B.a === 'grass' || B.b === 'grass') return true; return world.biomeMain(z - 450) === 'grass' || world.biomeMain(z + 60) === 'grass'; };
+const GB = { grass: 1, jungle: 1 }; const isGrassNear = (z) => { const B = world.biomeAt(z); if (GB[B.a] || GB[B.b]) return true; if (typeof zoneAt === 'function' && zoneAt(-z)) return true; return !!(GB[world.biomeMain(z - 450)] || GB[world.biomeMain(z + 60)]); };
+grass.extra = (z) => (typeof zoneAt === 'function' && zoneAt(-z) ? 1 : 0); // v51: cavern floors are meadow
 
 // ---------- world streaming ----------
 let world = new World(1);
@@ -568,7 +569,7 @@ function startGame() {
   const coarse = matchMedia('(pointer: coarse)').matches;
   S.tut = localStorage.getItem('canyon.tut') ? [] : (coarse ? [[0.3, 'Drag left / right to steer · finger height sets altitude'], [4.5, 'Finger low = skim the ground · high = 500 m safe band'], [8.7, 'Right slider = throttle · draw a half-circle to roll'], [12.9, 'Skim low & shave past rocks for combos'], [17.1, 'AUTO / SAFE / GOD buttons if you need help']]
     : [[0.3, 'A / D or ← / → to steer'], [4.5, '↑ / ↓ to climb / dive'], [8.7, 'W / S, drag or scroll to throttle'], [12.9, 'Skim low & shave past rocks for combos'], [17.1, 'R = barrel roll · AUTO / SAFE buttons if you need help']]);
-  setTimeout(() => { if (!controls.hasTilt && matchMedia('(pointer: coarse)').matches) $('hint').textContent = 'Drag left / right to steer · finger height = altitude'; }, 1500);
+  setTimeout(() => { if (!controls.hasTilt && matchMedia('(pointer: coarse)').matches) $('hint').textContent = (controls.heightMode === 'drag' ? 'Drag left / right to steer · drag up / down to climb / descend' : 'Drag left / right to steer · finger height = altitude'); }, 1500);
 }
 $('start').addEventListener('click', startGame);
 $('crash').addEventListener('click', () => { if (S.crashT > 0.5) startGame(); });
@@ -861,7 +862,7 @@ function holdTargetY(T, sp, dx, dz, px = S.pos.x, pz = S.pos.z) {
   if (controls.terrainFollow || T >= SAFE_AGL - 5) { S.tfOn = !(T >= SAFE_AGL - 5) || !!controls.terrainFollow; let g2 = -1e9; for (const t of [0.035, 0.07, 0.12]) { const d = Math.max(sp * t, 25); g2 = Math.max(g2, world.surface(px + dx * d, pz + dz * d)); } return g2 + T; }
   let y = S.floorRef + T; const clr = Math.min(25, T + 4);
   if (gA + clr > y) { y = gA + clr; S.tfOn = true; } // only to avoid the ground
-  const gU = world.surface(px, pz); if (y > gU + MAX_AGL - 4) y = gU + MAX_AGL - 4; // 500 m cap, approached smoothly
+  const gU = Math.max(world.surface(px, pz), S.floorRef ?? -1e9); if (y > gU + MAX_AGL - 4) y = gU + MAX_AGL - 4; // 500 m cap, approached smoothly
   return y;
 }
 function dbgUpdate() { if (!RX.debug) return; const c = controls, el = $('dbg'); if ((RX.dbgT = (RX.dbgT || 0) + 1) % 8) return; const f = (v, n = 2) => (v === undefined || v === null ? '-' : (+v).toFixed(n));
@@ -995,22 +996,35 @@ function updateFlight(dt) {
     const sp = Math.max(S.speed, 20), T = controls.altTarget ?? 30, dx = -Math.sin(S.heading), dz = -Math.cos(S.heading);
     vmax = clamp(90 + sp * 0.6, 90, 9000); const FOL = controls.terrainFollow || T >= SAFE_AGL - 5;
     const yT = holdTargetY(T, sp, dx, dz);
-    let vyT = clamp((yT - S.pos.y) * (FOL ? 6 : 1.2), -vmax, vmax); S.vyT = vyT;
-    if (!FOL) { const aM = (S.agl < 60 || vyT > S.vel.y + 200 ? 220 : 30) + sp * 0.02; S.vyCmd = (S.vyCmd ?? S.vel.y) + clamp(vyT - (S.vyCmd ?? S.vel.y), -aM * dt, aM * dt); vyT = S.vyCmd; } else S.vyCmd = S.vel.y; // vertical accel limit: smooth level hold
-    ptarget = Math.asin(clamp(vyT / sp, -0.6, 0.6)); prate = FOL ? (sp > 2000 ? 45 : 10) : 30; }
+    let vyT = clamp((yT - S.pos.y) * (FOL ? 3 : 1.2), -vmax, vmax);
+    const dv = controls.dragVy || 0, vc0 = S.vyCmd ?? S.vel.y;
+    let aM;
+    if (dv !== 0) { // v51 HEIGHT: DRAG — finger up/down from touch-down = climb/descend rate, immediate and proportional
+      const VR = clamp(70 + sp * 0.09, 70, 1200); vyT = dv * VR; aM = 140 + sp * 0.03;
+      const gU = world.surface(S.pos.x, S.pos.z); if (vyT < 0 && S.pos.y + vyT * 0.6 < gU + 4) vyT = Math.max(vyT, (gU + 4 - S.pos.y) / 0.6); // never drag into the ground
+      if (S.pos.y >= Math.max(gU, S.floorRef ?? gU) + MAX_AGL - 2 && vyT > 0) vyT = Math.min(vyT, 0);
+      controls.altTarget = clamp(FOL ? S.agl : S.pos.y - (S.floorRef ?? gU), 0, MAX_AGL); S.dragHeld = true;
+    } else {
+      if (S.dragHeld) { S.dragHeld = false; const a = 60 + sp * 0.02, stop = vc0 * Math.abs(vc0) / (2 * a); controls.altTarget = clamp((controls.altTarget ?? 30) + stop, 0, MAX_AGL); } // smooth stop at the release height
+      const avoid = vyT > vc0 + 120 || S.agl < 40; aM = (avoid ? 95 : FOL ? 60 : 30) + sp * (avoid ? 0.012 : 0.01); // capped vertical accel: no g-spikes (~10 g max avoiding)
+    }
+    { const zc = zoneAt(S.dist); if (zc && !RX.above) vyT = Math.min(vyT, Math.max((zc.b - ROOF_CLR - 20 - S.pos.y) * 2.5, -vmax)); } // cavern: the ceiling is the cap, approached smoothly
+    S.vyT = vyT; S.vyCmd = vc0 + clamp(vyT - vc0, -aM * dt, aM * dt); vyT = S.vyCmd;
+    ptarget = Math.asin(clamp(vyT / sp, -0.6, 0.6)); prate = 30; }
   S.pitch = damp(S.pitch, ptarget, prate, dt);
   _fwd.set(-Math.sin(S.heading) * Math.cos(S.pitch), Math.sin(S.pitch), -Math.cos(S.heading) * Math.cos(S.pitch));
   S.vel.copy(_fwd).multiplyScalar(S.speed);
   if (Math.abs(S.vel.y) > vmax) S.vel.y = Math.sign(S.vel.y) * vmax;
   (S.prevPos || (S.prevPos = new THREE.Vector3())).copy(S.pos);
-  if (S.holdDirect && (controls.terrainFollow || (controls.altTarget ?? 30) >= SAFE_AGL - 5) && S.speed > 2500 && !RX.blast) { // v49 high-speed terrain envelope: sub-stepped vertical tracking along the frame's path (1 frame = 150+ m)
+  if (false) { // v49 high-speed terrain envelope: sub-stepped vertical tracking along the frame's path (1 frame = 150+ m)
     const T = controls.altTarget ?? 30, n = Math.min(24, Math.ceil(S.speed * dt / 40)), sdt = dt / n, vm = vmax, y0 = S.pos.y; let y = y0;
     const hx = S.vel.x * sdt, hz = S.vel.z * sdt; let px = S.pos.x, pz = S.pos.z;
     for (let i = 0; i < n; i++) { px += hx; pz += hz; const yT = true ? Math.max(world.surface(px, pz), world.surface(px + hx * 2, pz + hz * 2) - 15) + T : holdTargetY(T, S.speed, hx / Math.hypot(hx, hz), hz / Math.hypot(hx, hz), px, pz); y += clamp(yT - y, -vm * sdt * (controls.terrainFollow ? 1 : 0.15), vm * sdt * (controls.terrainFollow ? 1 : 0.6)); }
     S.pos.x = px; S.pos.z = pz; S.pos.y = y; S.vel.y = (y - y0) / dt; S.pitch = damp(S.pitch, Math.asin(clamp(S.vel.y / S.speed, -0.5, 0.5)), 10, dt);
   } else S.pos.addScaledVector(S.vel, dt);
+  if (S.holdDirect && !S.car && S.mode === 'playing') { const gq = world.surface(S.pos.x, S.pos.z) + 1.5; if (S.pos.y < gq) S.pos.y = gq; } // hold never dips below ground
   geyserForces(dt);
-  { const gC = world.surface(S.pos.x, S.pos.z); if (!RX.above && S.pos.y > gC + MAX_AGL) { const ov = S.pos.y - gC - MAX_AGL; S.pos.y -= ov > 80 ? ov - 80 : Math.min(ov, ov * dt * 2 + 0.5); S.pitch = Math.min(S.pitch, 0.02); } } // hard cap: 500 m above the ground
+  { const gC = Math.max(world.surface(S.pos.x, S.pos.z), S.holdDirect ? (S.floorRef ?? -1e9) : -1e9); if (!RX.above && S.pos.y > gC + MAX_AGL) { const ov = S.pos.y - gC - MAX_AGL; if (S.holdDirect) S.pos.y -= Math.min(ov, ov * dt * 1.5 + 0.3); else { S.pos.y -= ov > 80 ? ov - 80 : Math.min(ov, ov * dt * 2 + 0.5); S.pitch = Math.min(S.pitch, 0.02); } } } // hard cap: 500 m above the ground
   rxLayer();
   const ground = world.surface(S.pos.x, S.pos.z);
   S.agl = S.pos.y - ground;
@@ -2895,6 +2909,7 @@ function rxMenuSync() {
   set('mxUltra', RX.ultra ? 'ULTRA · 124,700 ON' : 'ULTRA · OFF', RX.ultra);
   set('mxGhost', RX.ghost ? 'GHOST · ON' : 'GHOST · OFF', RX.ghost);
   set('mxForces', RX.forces ? 'REALISTIC FORCES · ON' : 'REALISTIC FORCES · OFF', RX.forces);
+  set('mxHMode', 'HEIGHT: ' + (controls.heightMode === 'drag' ? 'DRAG' : 'POSITION'), controls.heightMode === 'drag');
   set('mxTF', controls.terrainFollow ? 'TERRAIN FOLLOW · ON' : 'TERRAIN FOLLOW · OFF', controls.terrainFollow);
   set('mxDebug', RX.debug ? 'DEBUG OVERLAY · ON' : 'DEBUG OVERLAY · OFF', RX.debug);
   set('mxTilt', controls.tiltOn ? 'TILT STEER · ON' : 'TILT STEER · OFF', controls.tiltOn);
@@ -3029,6 +3044,7 @@ const RX_ACT = {
   mxUltra: () => setUltra(!RX.ultra), mxBlast: () => blastGo(), mxLand: () => rxLandToggle(), mxGhost: () => setGhost(!RX.ghost),
   mxScan: () => { RX.scanner = !RX.scanner; localStorage.setItem('canyon.ai', RX.scanner ? '1' : '0'); if (!RX.scanner) { $('aiBox').classList.add('hidden'); RX.aiLast = null; } rxMenuSync(); },
   mxForces: () => { RX.forces = !RX.forces; localStorage.setItem('canyon.forces', RX.forces ? '1' : '0'); pop(RX.forces ? 'REALISTIC FORCES ON · WIND / TURBULENCE / DAMAGE PULL' : 'REALISTIC FORCES OFF', 'banked'); rxMenuSync(); },
+  mxHMode: () => { controls.heightMode = controls.heightMode === 'drag' ? 'position' : 'drag'; localStorage.setItem('canyon.hmode', controls.heightMode); pop('HEIGHT: ' + controls.heightMode.toUpperCase(), 'banked'); rxMenuSync(); },
   mxTF: () => { controls.terrainFollow = !controls.terrainFollow; localStorage.setItem('canyon.tf', controls.terrainFollow ? '1' : '0'); pop('TERRAIN FOLLOW ' + (controls.terrainFollow ? 'ON' : 'OFF · ALTITUDE HELD'), 'banked'); rxMenuSync(); },
   mxDebug: () => { RX.debug = !RX.debug; $('dbg').classList.toggle('hidden', !RX.debug); rxMenuSync(); },
   optBtn: () => rxMenu(),
@@ -3230,7 +3246,8 @@ function tick(dt, draw) {
   updateSpecks(dt);
   if (RX.above !== RX.grassAbove) { RX.grassAbove = RX.above; grass.over = RX.above ? (x, z) => { const r = roofAt(z); return r ? r.t : null; } : null; grass.reset(); }
   grass.U.sunI.value = sunLight.intensity; grass.U.hemiI.value = hemi.intensity;
-  grass.update(dt, S.t, world, camera, S.pos, S.mode === 'crashed' ? 999 : S.agl, spdN, (isGrassNear(camera.position.z) && !RX.above || RX.above) && RX.iceK < 0.5);
+  { const cs = RX.camSim || (RX.camSim = { position: new THREE.Vector3(), rotation: camera.rotation, getWorldDirection: (v) => camera.getWorldDirection(v) }); cs.position.copy(camera.position); // camera lives in sim space
+    grass.update(dt, S.t, world, cs, S.pos, S.mode === 'crashed' ? 999 : S.agl, spdN, (isGrassNear(cs.position.z) && !RX.above || RX.above) && RX.iceK < 0.5); }
   { const wu = waterMat.uniforms; wu.trail.value = grass.trail; wu.wash.value = grass.U.wash.value; wu.washR.value = grass.U.washR.value * 1.2; wu.shipP.value.copy(S.pos); }
   streaks.update(camera.position, S.vel, S.mode === 'crashed' ? 0 : clamp((S.speed * 3.6 - 650) / 1300, 0, 1) + S.storm.k * 0.3);
   // sun light follows ship for a tight shadow frustum

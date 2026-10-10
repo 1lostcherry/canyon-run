@@ -343,3 +343,22 @@ body.tray-open #optBtn { background: #ff9a3c; color: #1a0c00; }
 body.tray-open #tfInd, body.tray-open #dbg, body.tray-open #assistInd { display: none !important; }
 body.tray-open #rotate { display: none !important; }
 #tfInd { top: 28% !important; }
+
+/* v51: options panel — each group = header row + its buttons */
+#rxMenu { display: flex !important; flex-direction: column !important; gap: 3px !important; grid-template-columns: none !important; }
+#rxMenu .tg { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 3px; padding: 0 !important; border: 0 !important; }
+#rxMenu .gh { grid-column: 1 / -1 !important; grid-row: auto !important; font-size: 8.5px; padding: 2px 5px !important; margin-top: 2px; }
+#rxMenu .mx { min-height: 25px !important; padding: 3px 3px !important; font-size: 9px !important; }
+#rxMenu #mxGod { order: 0 !important; grid-column: span 2; min-height: 25px !important; }
+#rxMenu .tg:has(#mxGod) .gh { order: -1; }
+@media (orientation: portrait) { #rxMenu .tg { grid-template-columns: repeat(3, 1fr); } #rxMenu .mx { min-height: 30px !important; } }
+#rxMenu .tg { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)) !important; }
+#rxMenu .mx { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 23px !important; font-size: 8.5px !important; line-height: 1.1; }
+#rxMenu .gh { font-size: 8px !important; padding: 1px 5px !important; margin-top: 1px !important; line-height: 1.2; }
+@media (orientation: portrait) { #rxMenu .tg { grid-template-columns: repeat(3, 1fr) !important; } #rxMenu .mx { white-space: normal; min-height: 30px !important; } }
+#rxMenu .tg { display: flex !important; flex-wrap: wrap !important; gap: 3px !important; }
+#rxMenu .tg > * { grid-column: auto !important; grid-row: auto !important; }
+#rxMenu .gh { flex: 0 0 100% !important; }
+#rxMenu .mx { flex: 1 1 auto !important; width: auto !important; max-width: none !important; overflow: visible; text-overflow: clip; padding: 3px 7px !important; }
+#rxMenu #mxGod { flex: 1.6 1 auto !important; }
+@media (orientation: portrait) { #rxMenu .mx { flex: 1 1 30% !important; } }

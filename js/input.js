@@ -47,7 +47,7 @@ export class Controls {
   onSlider(x) { return !!(this.barHit(x, 'thrBar', 50, 40) || this.barHit(x, 'altBar', 40, 50)); }
   attachPointer(el, isUI) {
     if (!localStorage.getItem('canyon.v50mig')) { for (const k of ['canyon.safe', 'canyon.safe47', 'canyon.tilt', 'canyon.forces', 'canyon.ai', 'canyon.smart', 'canyon.tf']) localStorage.setItem(k, '0'); localStorage.setItem('canyon.v50mig', '1'); } // one-time v50 reset of stale assist settings
-    this.terrainFollow = localStorage.getItem('canyon.tf') === '1';
+    this.terrainFollow = localStorage.getItem('canyon.tf') === '1'; this.heightMode = localStorage.getItem('canyon.hmode') || 'drag'; this.dragVy = 0;
     this.drags = new Map(); this.altStick = 0; this.fingerHeight = localStorage.getItem('canyon.fingerH') !== '0'; this.fingerT = null;
     el.addEventListener('pointerdown', (e) => {
       if (!this.enabled || isUI(e.target)) return;
@@ -65,7 +65,7 @@ export class Controls {
         this.drags.set(e.pointerId, { kind: 'roll', id: e.pointerId, x0: e.clientX, y0: e.clientY, r0: this.rollCmd, px: e.clientX, py: e.clientY, pa: null, sweep: 0, len: 0, arcDone: false });
       } else {
         for (const d of this.drags.values()) if (d.kind === 'thr' || d.kind === 'swipe') return;
-        if (this.fingerHeight) this.fingerT = Controls.fingerMap(e.clientY);
+        if (this.fingerHeight && this.heightMode === 'position') this.fingerT = Controls.fingerMap(e.clientY);
         this.drags.set(e.pointerId, { kind: 'swipe', id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: this.throttle, px: e.clientX, py: e.clientY, pa: null, sweep: 0, len: 0, arcDone: false });
       }
       this.drag = this.drags.size ? [...this.drags.values()][0] : null;
@@ -78,7 +78,8 @@ export class Controls {
       if (d.kind === 'alt') this.setAlt(e.clientY, d);
       else if (d.kind === 'thr') this.throttle = clamp(1 - (e.clientY - d.barTop) / d.barH, 0, 1);
       else {
-        if (this.fingerHeight) this.fingerT = Controls.fingerMap(e.clientY); // absolute finger height -> target altitude
+        if (this.fingerHeight && this.heightMode === 'position') this.fingerT = Controls.fingerMap(e.clientY); // absolute finger height -> target altitude
+        else if (this.fingerHeight) { const Rv = innerHeight * 0.22, u = (d.y0 - e.clientY) / Rv, au = Math.abs(u), dzv = 0.07; this.dragVy = au < dzv ? 0 : Math.sign(u) * Math.pow(Math.min((au - dzv) / (1 - dzv), 1), 1.25); } // HEIGHT: DRAG
         // gameplay swipe = LEFT/RIGHT steering only (finger right-to-left = steer left), proportional to displacement; no pitch, no throttle
         const R = Math.min(innerWidth, innerHeight) * 0.28, dz = 0.06;
         const v = (e.clientX - d.x0) / R, av = Math.abs(v);
@@ -90,7 +91,7 @@ export class Controls {
       this.drags.delete(e.pointerId);
       if (d.kind === 'roll') this.rollCmd = 0; // release: return to level
       if (d.kind === 'alt') this.altStick = 0; // target altitude stays where the slider was left
-      if (d.kind === 'swipe') { this.touchSteer = 0; this.swT[0] = this.swT[1] = 0; if (this.swS) this.swS[0] = this.swS[1] = 0; } // spring back to neutral
+      if (d.kind === 'swipe') { this.dragVy = 0; this.touchSteer = 0; this.swT[0] = this.swT[1] = 0; if (this.swS) this.swS[0] = this.swS[1] = 0; } // spring back to neutral
       this.drag = this.drags.size ? [...this.drags.values()][0] : null;
     };
     el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
@@ -198,7 +199,7 @@ export class Controls {
     { // smoothed swipe stick (always on): left/right only
       const k = 1 - Math.exp(-dt * 40); this.swS = this.swS || [0, 0];
       this.swS[0] += (this.swT[0] - this.swS[0]) * k; this.swS[1] += (this.swT[1] - this.swS[1]) * k;
-      const dv = this.drags ? [...this.drags.values()] : [], held = dv.some((q) => q.kind === 'swipe') && !dv.some((q) => q.kind === 'alt'); // the alt slider wins while held
+      const dv = this.drags ? [...this.drags.values()] : [], held = dv.some((q) => q.kind === 'swipe') && !dv.some((q) => q.kind === 'alt') && this.heightMode === 'position'; // the alt slider wins while held
       if (held) steer = this.swS[0]; else steer += this.swS[0]; // swipes never pitch
       this.swipeHeld = !!held;
     }

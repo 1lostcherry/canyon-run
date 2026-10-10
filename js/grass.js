@@ -1,6 +1,6 @@
 // GPU instanced grass with wind sway + jet-wash (radial push, flattened wake, outward ripple rings)
 import * as THREE from 'three';
-import { DX, DZ, X0, SEG_X } from './terrain.js?v=50';
+import { DX, DZ, X0, SEG_X } from './terrain.js?v=51';
 
 const ROWS = 64, COLS = SEG_X + 1, TRAIL = 10;
 
@@ -98,7 +98,7 @@ uniform vec3 sunDir; uniform vec3 sunCol; uniform vec3 skyCol; uniform vec3 gndC
 uniform vec3 fogColor; uniform float fogNear; uniform float fogFar; uniform vec3 hazeCol; uniform float hazeK;
 varying float vT; varying float vSheen; varying float vVar; varying vec3 vW; varying float vDry;
 void main(){
-  vec3 base = mix(vec3(0.07, 0.14, 0.025), vec3(0.2, 0.3, 0.06), vVar);
+  vec3 base = mix(vec3(0.13, 0.25, 0.045), vec3(0.32, 0.46, 0.11), vVar);
   base = mix(base, vec3(0.36, 0.33, 0.1), smoothstep(0.55, 0.95, vDry) * 0.7);
   vec3 col = base * mix(0.35, 1.25, vT);
   vec3 v = normalize((cameraPosition + uRO) - vW);
@@ -163,8 +163,8 @@ export class Grass {
       if (this.loaded[s] === j) continue;
       this.loaded[s] = j; budget--; dirty = true;
       const z = -j * DZ, B = world.biomeAt(z); const ovRow = this.over && this.over(0, z) !== null;
-      const gw = ovRow ? 1 : (B.a === 'grass' ? 1 - B.t : 0) + (B.b === 'grass' ? B.t : 0);
-      const o = s * COLS * 2;
+      const GW = (n) => n === 'grass' ? 1 : n === 'jungle' ? 0.85 : 0; const gw = ovRow ? 1 : Math.max(GW(B.a) * (1 - B.t) + GW(B.b) * B.t, this.extra ? this.extra(z) : 0);
+      const o = s * COLS * 2; const fl = gw > 0.01 ? Math.max(world.height0(world.pathX(z), z), 0) : 0;
       for (let i = 0; i < COLS; i++) {
         const ov = this.over ? this.over(X0 + i * DX, z) : null;
         if (ov !== null) { // overlay surface (upper-world deck): dense meadow with patchy clearings
@@ -173,7 +173,7 @@ export class Grass {
         }
         const h = gw > 0.01 ? world.height(X0 + i * DX, z) : 0;
         this.data[o + i * 2] = h;
-        this.data[o + i * 2 + 1] = gw > 0.01 ? gw * Math.min(Math.max((h - 0.8) / 2, 0), 1) * Math.min(Math.max((150 - h) / 60, 0), 1) : 0;
+        this.data[o + i * 2 + 1] = gw > 0.01 ? gw * Math.min(Math.max((h - 0.8) / 2, 0), 1) * Math.min(Math.max((fl + 260 - h) / 80, 0), 1) : 0; // v51: snowline relative to the route floor (terrain is higher since v42)
       }
     }
     if (dirty) this.tex.needsUpdate = true;
