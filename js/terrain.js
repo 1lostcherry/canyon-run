@@ -142,8 +142,8 @@ export class World {
   grassH(x, z) {
     const cx = this.pathX(z), hw = this.halfW(z), d = Math.abs(x - cx);
     const n = this.fbm(x * 0.003 + 21.7, z * 0.003, 3);
-    let h = 14 + (n - 0.5) * 16 + 3.5 * Math.sin(x * 0.011 + z * 0.007 + n * 3);
-    const e = d - hw * 1.05 + (n - 0.5) * 260;
+    let h = 14 + (n - 0.5) * 7 + 1.5 * Math.sin(x * 0.011 + z * 0.007 + n * 3); // v52: broad flat open meadow floor
+    const e = d - hw * 1.7 + (n - 0.5) * 260;
     if (e > 0) { let t = Math.min(e / 420, 1); t = t * t * (3 - 2 * t); h += t * (120 + 170 * this.noise(x * 0.0018 + 1.7, z * 0.0018)) + (this.noise(x * 0.01, z * 0.01) - 0.5) * 30 * t; }
     return h;
   }
@@ -303,7 +303,7 @@ function biomeColor(type, out, h, slope, n, band, band2) {
     }
     case 'grass': {
       mix3(_ca, [0.24, 0.23, 0.2], [0.42, 0.4, 0.35], band);
-      mix3(_cb, [0.13, 0.24, 0.05], [0.36, 0.36, 0.11], n * n);
+      mix3(_cb, [0.16, 0.3, 0.06], [0.3, 0.42, 0.1], n * n);
       const g = smooth(0.42, 0.16, slope);
       mix3(out, _ca, _cb, g);
       if (h < 1.5) mix3(out, out, [0.12, 0.16, 0.08], 0.5);
@@ -365,7 +365,7 @@ export function buildChunkGeometry(world, idx) {
 }
 
 // Objects (rock spires, mesas, boulders) + rings for a chunk
-export const ROCK_COL = { gorge: [0.26, 0.25, 0.2], desert: [0.42, 0.19, 0.09], volcanic: [0.07, 0.055, 0.05], fjord: [0.33, 0.34, 0.36], ocean: [0.2, 0.19, 0.17], coast: [0.82, 0.78, 0.68], grass: [0.4, 0.39, 0.35], jungle: [0.22, 0.24, 0.17] };
+export const ROCK_COL = { gorge: [0.26, 0.25, 0.2], desert: [0.42, 0.19, 0.09], volcanic: [0.07, 0.055, 0.05], fjord: [0.33, 0.34, 0.36], ocean: [0.2, 0.19, 0.17], coast: [0.82, 0.78, 0.68], grass: [0.62, 0.36, 0.2], jungle: [0.22, 0.24, 0.17] };
 export function genChunkContent(world, idx) {
   const rng = makeRng((world.seed * 9301 + idx * 49297 + 233280) >>> 0);
   const objs = [];
@@ -416,7 +416,7 @@ export function genChunkContent(world, idx) {
   }
   // pine-like trees on coast & fjord slopes
   if (biome === 'coast' || biome === 'fjord' || biome === 'gorge' || biome === 'grass') {
-    const nT = biome === 'coast' ? 90 : biome === 'gorge' ? 110 : biome === 'grass' ? 35 : 50;
+    const nT = biome === 'coast' ? 90 : biome === 'gorge' ? 110 : biome === 'grass' ? 0 : 50;
     for (let i = 0; i < nT; i++) {
       const z = z0 - rng() * CHUNK_L;
       const cx = world.pathX(z), hw = world.halfW(z);
@@ -428,6 +428,16 @@ export function genChunkContent(world, idx) {
       if (Math.abs(g2 - g) > 4 || Math.abs(g3 - g) > 4) continue;
       place('tree', x, z, 2.2 + rng() * 2.2, 8 + rng() * 10, false);
     }
+  }
+  // v52 meadow: rounded broadleaf trees scattered in clumps, open lanes kept clear along the flight line
+  if (biome === 'grass') {
+    for (let i = 0; i < 170; i++) {
+      const z = z0 - rng() * CHUNK_L, cx = world.pathX(z), hw = world.halfW(z), side = rng() < 0.5 ? -1 : 1;
+      const x = cx + side * (hw * 0.45 + Math.pow(rng(), 1.6) * 900); const g = world.gridHeight(x, z);
+      if (g < 2 || g > 300) continue;
+      objs.push({ type: 'jtree', x, y: g - 0.5, z, r: 7 + rng() * 9, h: 12 + rng() * 14, valley: false, rot: rng() * Math.PI * 2, variant: Math.floor(rng() * 3), col: [0.85 + rng() * 0.3, 0.95 + rng() * 0.3, 0.75 + rng() * 0.3] });
+    }
+    for (let i = 0; i < 40; i++) { const z = z0 - rng() * CHUNK_L, cx = world.pathX(z), hw = world.halfW(z); const x = cx + (rng() * 2 - 1) * hw * 1.6; if (Math.abs(x - cx) < hw * 0.3) continue; const rr = rng(); place('boulder', x, z, 3 + rr * rr * 12, 0, true); }
   }
   // dense jungle canopy (broadleaf + palms) everywhere except the river
   if (biome === 'jungle') {
@@ -453,7 +463,7 @@ export function genChunkContent(world, idx) {
     const xb = cx + side * (hw * 0.55), hb = Math.max(world.gridHeight(xb, z), 0);
     if (ht - hb > 90) falls.push({ xt, ht, xb, hb, z, w: 22 + rng() * 30, side });
   }
-  if (biome === 'grass') for (const o of objs) if (o.type === 'spire' || o.type === 'mesa') { o.h = Math.max(o.h * 0.42, 14); o.r *= 1.25; }
+  if (biome === 'grass') for (const o of objs) if (o.type === 'spire' || o.type === 'mesa') { o.h = Math.max(o.h * 0.75, 40); if (o.type === 'mesa') { o.type = 'spire'; o.r = Math.min(o.r * 0.4, 30); } const cx = world.pathX(o.z), hw = world.halfW(o.z); if (Math.abs(o.x - cx) < hw * 0.4) o.x = cx + Math.sign(o.x - cx || 1) * hw * (0.4 + rng() * 0.5); if (o.y !== undefined) o.y = world.gridHeight(o.x, o.z) - 2; } // standing sandstone pillars flank open meadow lanes
   return { objs, falls };
 }
 

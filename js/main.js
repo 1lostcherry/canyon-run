@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=51';
-import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=51';
-import { loadAssets } from './assets.js?v=51';
+import { World, makeRng, CHUNK_L, buildChunkGeometry, genChunkContent, radiusAt, makeSpireGeos, makeMesaGeos, makeBoulderGeos, makeTreeGeos, makeJungleGeos, makeLeafAtlas, patchRockMaterial, TRI } from './terrain.js?v=52';
+import { buildShip, upgradeShip, SHIP_PROBES, PROBE_ZONE, FROST } from './ship.js?v=52';
+import { loadAssets } from './assets.js?v=52';
 const ASSETS = await loadAssets().catch((e) => { console.warn(e); return {}; });
-import { Grass } from './grass.js?v=51';
-import { GpuDust } from './gpudust.js?v=51';
-import { PostFX } from './postfx.js?v=51';
-import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=51';
-import { GameAudio } from './audio.js?v=51';
-import { Controls } from './input.js?v=51';
+import { Grass } from './grass.js?v=52';
+import { GpuDust } from './gpudust.js?v=52';
+import { PostFX } from './postfx.js?v=52';
+import { ParticlePool, Streaks, Shockwaves, Precip, makeDustTexture, makeGlowTexture, fogU } from './fx.js?v=52';
+import { GameAudio } from './audio.js?v=52';
+import { Controls } from './input.js?v=52';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -569,7 +569,7 @@ function startGame() {
   const coarse = matchMedia('(pointer: coarse)').matches;
   S.tut = localStorage.getItem('canyon.tut') ? [] : (coarse ? [[0.3, 'Drag left / right to steer · finger height sets altitude'], [4.5, 'Finger low = skim the ground · high = 500 m safe band'], [8.7, 'Right slider = throttle · draw a half-circle to roll'], [12.9, 'Skim low & shave past rocks for combos'], [17.1, 'AUTO / SAFE / GOD buttons if you need help']]
     : [[0.3, 'A / D or ← / → to steer'], [4.5, '↑ / ↓ to climb / dive'], [8.7, 'W / S, drag or scroll to throttle'], [12.9, 'Skim low & shave past rocks for combos'], [17.1, 'R = barrel roll · AUTO / SAFE buttons if you need help']]);
-  setTimeout(() => { if (!controls.hasTilt && matchMedia('(pointer: coarse)').matches) $('hint').textContent = (controls.heightMode === 'drag' ? 'Drag left / right to steer · drag up / down to climb / descend' : 'Drag left / right to steer · finger height = altitude'); }, 1500);
+  setTimeout(() => { if (!controls.hasTilt && matchMedia('(pointer: coarse)').matches) $('hint').textContent = (controls.heightMode === 'drag' ? 'Drag left/right to steer · drag up/down to climb/dive' : 'Drag left / right to steer · finger height = altitude'); }, 1500);
 }
 $('start').addEventListener('click', startGame);
 $('crash').addEventListener('click', () => { if (S.crashT > 0.5) startGame(); });
@@ -995,22 +995,24 @@ function updateFlight(dt) {
   if (S.holdDirect) { // v50: altitude target = smoothed route floor + target (passive); terrain-follow only to avoid ground (or always when TERRAIN FOLLOW is on)
     const sp = Math.max(S.speed, 20), T = controls.altTarget ?? 30, dx = -Math.sin(S.heading), dz = -Math.cos(S.heading);
     vmax = clamp(90 + sp * 0.6, 90, 9000); const FOL = controls.terrainFollow || T >= SAFE_AGL - 5;
-    const yT = holdTargetY(T, sp, dx, dz);
+    const yT = holdTargetY(T, sp, dx, dz); S.yT = yT;
     let vyT = clamp((yT - S.pos.y) * (FOL ? 3 : 1.2), -vmax, vmax);
-    const dv = controls.dragVy || 0, vc0 = S.vyCmd ?? S.vel.y;
+    const dv = controls.dragVy || 0; let vc0 = S.vyCmd ?? S.vel.y;
     let aM;
     if (dv !== 0) { // v51 HEIGHT: DRAG — finger up/down from touch-down = climb/descend rate, immediate and proportional
-      const VR = clamp(70 + sp * 0.09, 70, 1200); vyT = dv * VR; aM = 140 + sp * 0.03;
+      const VR = clamp(70 + sp * 0.09, 70, 1200); vyT = dv * VR; aM = 220 + sp * 0.05;
+      if (!S.dragHeld || Math.sign(vc0) !== Math.sign(dv)) { vc0 = Math.sign(dv) * Math.max(Math.abs(vc0) * (Math.sign(vc0) === Math.sign(dv) ? 1 : 0), Math.min(Math.abs(vyT), 25 + sp * 0.02)); S.pitch = Math.asin(clamp(vc0 / sp, -0.6, 0.6)); } // instant: cancel opposing momentum, move the finger's way this frame
       const gU = world.surface(S.pos.x, S.pos.z); if (vyT < 0 && S.pos.y + vyT * 0.6 < gU + 4) vyT = Math.max(vyT, (gU + 4 - S.pos.y) / 0.6); // never drag into the ground
       if (S.pos.y >= Math.max(gU, S.floorRef ?? gU) + MAX_AGL - 2 && vyT > 0) vyT = Math.min(vyT, 0);
       controls.altTarget = clamp(FOL ? S.agl : S.pos.y - (S.floorRef ?? gU), 0, MAX_AGL); S.dragHeld = true;
     } else {
-      if (S.dragHeld) { S.dragHeld = false; const a = 60 + sp * 0.02, stop = vc0 * Math.abs(vc0) / (2 * a); controls.altTarget = clamp((controls.altTarget ?? 30) + stop, 0, MAX_AGL); } // smooth stop at the release height
-      const avoid = vyT > vc0 + 120 || S.agl < 40; aM = (avoid ? 95 : FOL ? 60 : 30) + sp * (avoid ? 0.012 : 0.01); // capped vertical accel: no g-spikes (~10 g max avoiding)
+      if (S.dragHeld) { S.dragHeld = false; S.relT = 0.7; const a = 260 + sp * 0.05, stop = vc0 * Math.abs(vc0) / (2 * a); controls.altTarget = clamp((controls.altTarget ?? 30) + stop, 0, MAX_AGL); } // quick firm stop at the release height
+      const avoid = vyT > vc0 + 120 || S.agl < 40; aM = (avoid ? 95 : FOL ? 60 : 30) + sp * (avoid ? 0.012 : 0.01);
+      if (S.relT > 0) { S.relT -= dt; aM = Math.max(aM, 260 + sp * 0.05); vyT = clamp((yT - S.pos.y) * 3, -vmax, vmax); } // capped vertical accel: no g-spikes (~10 g max avoiding)
     }
     { const zc = zoneAt(S.dist); if (zc && !RX.above) vyT = Math.min(vyT, Math.max((zc.b - ROOF_CLR - 20 - S.pos.y) * 2.5, -vmax)); } // cavern: the ceiling is the cap, approached smoothly
     S.vyT = vyT; S.vyCmd = vc0 + clamp(vyT - vc0, -aM * dt, aM * dt); vyT = S.vyCmd;
-    ptarget = Math.asin(clamp(vyT / sp, -0.6, 0.6)); prate = 30; }
+    ptarget = Math.asin(clamp(vyT / sp, -0.6, 0.6)); prate = dv !== 0 || S.relT > 0 ? 80 : 30; }
   S.pitch = damp(S.pitch, ptarget, prate, dt);
   _fwd.set(-Math.sin(S.heading) * Math.cos(S.pitch), Math.sin(S.pitch), -Math.cos(S.heading) * Math.cos(S.pitch));
   S.vel.copy(_fwd).multiplyScalar(S.speed);
